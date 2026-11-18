@@ -179,6 +179,28 @@ impl Session {
         )
     }
 
+    /// A session on a document the caller holds, with no folder behind it
+    /// and no history: what a reader of a project that is open somewhere
+    /// else - a window's live project - draws its frames and exports from.
+    /// Nothing is read from `path` and nothing is written to it unless the
+    /// caller saves, so it is for reading.
+    pub fn detached(
+        path: &str,
+        settings: DocumentSettings,
+        document: &serde_json::Value,
+    ) -> Result<Session, String> {
+        let editor =
+            Editor::from_document(document).ok_or("The open project could not be read")?;
+        Ok(Session {
+            path: path.to_owned(),
+            settings,
+            editor,
+            upgraded: Vec::new(),
+            retired: Default::default(),
+            unread: Default::default(),
+        })
+    }
+
     /// The links to retired effects this open read as links to the
     /// effects that stand in for them, old id and new. Empty when the
     /// document named none; the change is the document's once it is saved.

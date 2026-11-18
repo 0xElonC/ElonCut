@@ -31,6 +31,7 @@ mod ui {
     slint::include_modules!();
 }
 
+mod agent;
 mod batch_volume;
 mod chips;
 mod dock;
@@ -44,6 +45,7 @@ mod i18n;
 #[cfg(target_os = "ios")]
 mod ios;
 mod keymap;
+mod live;
 mod meters;
 mod motion_tiles;
 mod platform;
@@ -402,6 +404,7 @@ fn start(project: Option<std::path::PathBuf>, smoke: Smoke) -> Result<(), slint:
     app.set_app_version(env!("CARGO_PKG_VERSION").into());
     app.set_can_drop(cfg!(not(any(target_os = "android", target_os = "ios"))));
     app.set_capcut(concat_host::capcut::drafts_folder().is_some());
+    agent::install(&app);
 
     // The user's own packages - imported looks, and any effect folder they
     // or the community wrote - sit beside the built-ins from the first
@@ -3025,6 +3028,7 @@ const EXPORT_PATIENCE: std::time::Duration = std::time::Duration::from_secs(10);
 /// frame and removes its files on the way out; one that does not stop
 /// within [`EXPORT_PATIENCE`] does not keep the quit from quitting.
 fn stop_exports() {
+    agent::shutdown();
     let mut held = None;
     Shell::with(|shell, _| {
         let mut studio = shell.studio.borrow_mut();

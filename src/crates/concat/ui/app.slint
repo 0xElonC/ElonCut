@@ -112,8 +112,22 @@ import {
     KeyRowData,
 } from "workspace/keyframes-pane.slint";
 import { SpeedRamp } from "inspector/speed-ramp.slint";
+import {
+    AgentAttachment,
+    AgentChat,
+    AgentMessage,
+    AgentRole,
+    AgentSession,
+    AgentStatus,
+} from "workspace/agent-pane.slint";
 
 export {
+    AgentAttachment,
+    AgentChat,
+    AgentMessage,
+    AgentRole,
+    AgentSession,
+    AgentStatus,
     Curves,
     Fmt,
     Focus,
@@ -189,7 +203,7 @@ export {
     NewVoiceData,
 }
 export component App inherits Window {
-    title: "Concat";
+    title: "ElonCut";
     // The taskbar's and Alt-Tab's picture on Windows, and the window
     // list's on X11. A Mac takes its Dock icon from the bundle and ignores
     // this; the .exe's own, for Explorer, is embedded by build.rs.

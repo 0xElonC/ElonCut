@@ -1,0 +1,1183 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+// SPDX-FileCopyrightText: 2026 Jareer Abdullah and Concat contributors
+
+// The Agent pane: a conversation with an agent that edits the project.
+//
+// Four pages share one pane, and only one is up at a time:
+//
+//   - the conversation, which is the messages and the composer under them;
+//   - the welcome, which is the conversation before its first message;
+//   - the status page, for when there is no agent to talk to yet (Codex is
+//     not installed, is starting, or has stopped with an error);
+//   - the conversations list, which is where they are found, renamed and
+//     deleted.
+//
+// The pane holds no state of its own beyond what is being typed and which
+// page is up. Everything it shows is on the `AgentChat` global, which Rust
+// fills from the agent's event stream, and every verb is a callback on it.
+
+import { I18n } from "../i18n.slint";
+import { Theme } from "../theme/theme.slint";
+import { Glyph, Icon } from "../icons.slint";
+import { IconButton } from "../primitives/panel.slint";
+import { Button } from "../primitives/modal.slint";
+import { Select } from "../primitives/select.slint";
+import { ThinScrollbar } from "../primitives/scrollbar.slint";
+import { Tip } from "../primitives/tooltip.slint";
+import { Pane, PaneHeader } from "pane.slint";
+import { PaneKind, PaneSwitcher } from "pane-switcher.slint";
+
+/// Who said it.
+export enum AgentRole {
+    /// the person
+    user,
+    /// the agent's words
+    assistant,
+    /// something the agent did to the project: one tool call
+    tool,
+    /// a line the conversation itself says: the model changed, a turn stopped
+    notice,
+}
+
+/// Whether there is an agent to talk to.
+export enum AgentStatus {
+    ready,
+    /// Codex is being started
+    connecting,
+    /// There is no Codex on this machine
+    missing,
+    /// Codex stopped, or would not start
+    failed,
+}
+
+/// A file on its way to the agent, or sent with a message.
+export struct AgentAttachment {
+    id: string,
+    name: string,
+    /// "image", "video", "audio" or "file": what the chip's mark is
+    kind: string,
+    /// "1920x1080 · 12 s", "2.4 MB": a line under the name
+    detail: string,
+    thumb: image,
+    has-thumb: bool,
+}
+
+/// One line of a conversation.
+export struct AgentMessage {
+    id: string,
+    role: AgentRole,
+    text: string,
+    attachments: [AgentAttachment],
+    /// An assistant message: what it thought on the way, dimmer than its
+    /// answer. Empty for none.
+    reasoning: string,
+    /// A tool message: the tool's name, what it was given, what came back.
+    tool: string,
+    tool-input: string,
+    tool-output: string,
+    /// 0 running, 1 done, 2 failed
+    tool-state: int,
+    /// Words are still arriving.
+    streaming: bool,
+}
+
+/// One conversation in the list.
+export struct AgentSession {
+    id: string,
+    title: string,
+    /// "Summer trip · 2 hours ago"
+    detail: string,
+    /// How many messages it holds.
+    count: int,
+    /// A turn is running in it.
+    running: bool,
+    current: bool,
+}
+
+/// What the pane shows and does, as one list for Rust to publish.
+export global AgentChat {
+    in property <AgentStatus> status: AgentStatus.ready;
+    /// The words under the status page's title: why, and what to do.
+    in property <string> status-detail;
+
+    in property <[AgentMessage]> messages;
+    in property <[AgentSession]> sessions;
+    in property <string> title;
+    /// The project the agent is working in; empty when none is open.
+    in property <string> project;
+    /// A turn is running: the send button is a stop button until it ends.
+    in property <bool> busy;
+    /// The agent edits the project that is open in the window, as you watch,
+    /// instead of a copy of its own.
+    in-out property <bool> live: true;
+
+    /// The models Codex offers, and which is chosen.
+    in property <[string]> models;
+    in-out property <int> model-index;
+    /// The depths of thought the chosen model takes, and which is chosen.
+    in property <[string]> efforts;
+    in-out property <int> effort-index;
+
+    /// What is waiting in the composer to go with the next message.
+    in property <[AgentAttachment]> attachments;
+    /// Things to try, on the welcome page.
+    in property <[string]> suggestions;
+
+    callback send(text: string);
+    callback stop();
+    callback attach-pick();
+    callback attach-remove(id: string);
+    callback new-session();
+    callback open-session(id: string);
+    callback rename-session(id: string, title: string);
+    callback delete-session(id: string);
+    callback search-sessions(text: string);
+    callback model-changed(index: int);
+    callback effort-changed(index: int);
+    callback live-changed(on: bool);
+    callback retry();
+    callback open-help();
+}
+
+/// What a kind of attachment looks like: the library's colours and marks.
+global Kinds {
+    public pure function tint(kind: string) -> color {
+        return kind == "video" ? Theme.kind-video
+            : kind == "audio" ? Theme.kind-audio
+            : kind == "image" ? Theme.kind-image
+            : Theme.fg-muted;
+    }
+
+    public pure function glyph(kind: string) -> Glyph {
+        return kind == "video" ? Glyph.film
+            : kind == "audio" ? Glyph.music
+            : kind == "image" ? Glyph.image
+            : Glyph.folder;
+    }
+}
+
+// A file as a chip: a thumbnail or a mark, its name, and what it is. In the
+// composer it carries a cross; in a sent message it does not.
+component AttachmentChip inherits Rectangle {
+    in property <AgentAttachment> data;
+    in property <bool> removable;
+    callback removed();
+
+    height: 36px;
+    min-width: 96px;
+    max-width: 200px;
+    background: Theme.well;
+    border-radius: Theme.r;
+    border-width: 1px;
+    border-color: Theme.line;
+    clip: true;
+
+    HorizontalLayout {
+        spacing: 8px;
+        padding-right: 6px;
+
+        Rectangle {
+            width: 36px;
+            background: Kinds.tint(root.data.kind).transparentize(0.82);
+
+            if root.data.has-thumb: Image {
+                width: parent.width;
+                height: parent.height;
+                source: root.data.thumb;
+                image-fit: cover;
+            }
+            if !root.data.has-thumb: Icon {
+                glyph: Kinds.glyph(root.data.kind);
+                size: 15px;
+                tint: Kinds.tint(root.data.kind);
+            }
+        }
+
+        VerticalLayout {
+            alignment: center;
+            horizontal-stretch: 1;
+            Text {
+                text: root.data.name;
+                color: Theme.fg;
+                font-size: Theme.fs-sm;
+                overflow: elide;
+            }
+            Text {
+                text: root.data.detail;
+                color: Theme.fg-dim;
+                font-size: Theme.fs-xs;
+                overflow: elide;
+            }
+        }
+
+        if root.removable: VerticalLayout {
+            alignment: center;
+            IconButton {
+                glyph: Glyph.close;
+                label: I18n.t("agent.removeAttachment");
+                icon-size: 10px;
+                width: 20px;
+                height: 20px;
+                clicked => { root.removed(); }
+            }
+        }
+    }
+}
+
+// One tool call: a line that says what the agent did, which opens to what it
+// was given and what came back.
+component ToolCard inherits Rectangle {
+    in property <AgentMessage> data;
+
+    property <bool> open;
+    property <bool> has-detail: root.data.tool-input != "" || root.data.tool-output != "";
+
+    background: Theme.well;
+    border-radius: Theme.r;
+    border-width: 1px;
+    border-color: root.data.tool-state == 2 ? Theme.danger : Theme.line;
+    height: col.preferred-height;
+    clip: true;
+
+    col := VerticalLayout {
+        Rectangle {
+            height: 30px;
+
+            HorizontalLayout {
+                padding-left: 10px;
+                padding-right: 10px;
+                spacing: 8px;
+
+                VerticalLayout {
+                    alignment: center;
+                    Icon {
+                        glyph: Glyph.tool;
+                        size: 12px;
+                        tint: Theme.fg-muted;
+                    }
+                }
+                Text {
+                    text: root.data.tool;
+                    color: Theme.fg;
+                    font-size: Theme.fs;
+                    font-weight: Theme.weight-title;
+                    vertical-alignment: center;
+                }
+                Text {
+                    horizontal-stretch: 1;
+                    text: root.data.text;
+                    color: Theme.fg-dim;
+                    font-size: Theme.fs;
+                    vertical-alignment: center;
+                    overflow: elide;
+                }
+                VerticalLayout {
+                    alignment: center;
+                    // running: a dot that breathes; done: a tick; failed: a mark
+                    if root.data.tool-state == 0: Rectangle {
+                        width: 8px;
+                        height: 8px;
+                        border-radius: 4px;
+                        background: Theme.accent;
+                        opacity: Math.mod(animation-tick() / 1ms, 1400) < 700 ? 1.0 : 0.35;
+                    }
+                    if root.data.tool-state == 1: Icon {
+                        glyph: Glyph.check;
+                        size: 12px;
+                        tint: Theme.green;
+                    }
+                    if root.data.tool-state == 2: Icon {
+                        glyph: Glyph.alert;
+                        size: 12px;
+                        tint: Theme.danger;
+                    }
+                }
+            }
+
+            TouchArea {
+                enabled: root.has-detail;
+                mouse-cursor: root.has-detail ? MouseCursor.pointer : MouseCursor.default;
+                clicked => { root.open = !root.open; }
+            }
+        }
+
+        if root.open && root.has-detail: VerticalLayout {
+            padding: 10px;
+            padding-top: 2px;
+            spacing: 6px;
+
+            if root.data.tool-input != "": Text {
+                text: root.data.tool-input;
+                color: Theme.fg-muted;
+                font-family: Theme.font-technical;
+                font-size: Theme.fs-sm;
+                wrap: word-wrap;
+            }
+            if root.data.tool-output != "": Text {
+                text: root.data.tool-output;
+                color: root.data.tool-state == 2 ? Theme.danger : Theme.fg-dim;
+                font-family: Theme.font-technical;
+                font-size: Theme.fs-sm;
+                wrap: word-wrap;
+            }
+        }
+    }
+}
+
+// One line of the conversation, drawn by who said it.
+component MessageRow inherits Rectangle {
+    in property <AgentMessage> data;
+    /// The width the list gives its rows.
+    in property <length> room;
+
+    height: col.preferred-height;
+
+    col := VerticalLayout {
+        // The person: right-aligned, in a bubble, files above their words.
+        if root.data.role == AgentRole.user: VerticalLayout {
+            alignment: start;
+            spacing: 6px;
+
+            if root.data.attachments.length > 0: HorizontalLayout {
+                alignment: end;
+                spacing: 6px;
+                for file in root.data.attachments: AttachmentChip {
+                    data: file;
+                }
+            }
+            if root.data.text != "": HorizontalLayout {
+                alignment: end;
+                Rectangle {
+                    background: Theme.field;
+                    border-radius: Theme.r-lg;
+                    max-width: root.room * 0.88;
+                    min-height: bubble-text.preferred-height + 16px;
+
+                    bubble-text := Text {
+                        x: 12px;
+                        y: 8px;
+                        width: parent.width - 24px;
+                        text: root.data.text;
+                        color: Theme.fg;
+                        font-size: Theme.fs-lg;
+                        wrap: word-wrap;
+                    }
+                    // Wide enough for its words, but never past the cap.
+                    preferred-width: Math.min(root.room * 0.88, probe.preferred-width + 24px);
+                    probe := Text {
+                        visible: false;
+                        text: root.data.text;
+                        font-size: Theme.fs-lg;
+                        wrap: no-wrap;
+                    }
+                }
+            }
+        }
+
+        // The agent: no bubble, a mark in the margin, words running down.
+        if root.data.role == AgentRole.assistant: HorizontalLayout {
+            spacing: 10px;
+
+            VerticalLayout {
+                alignment: start;
+                padding-top: 2px;
+                Rectangle {
+                    width: 20px;
+                    height: 20px;
+                    border-radius: 10px;
+                    background: Theme.accent-soft;
+                    Icon {
+                        glyph: Glyph.sparkle;
+                        size: 11px;
+                        tint: Theme.accent;
+                    }
+                }
+            }
+            VerticalLayout {
+                horizontal-stretch: 1;
+                spacing: 6px;
+
+                if root.data.reasoning != "": Text {
+                    text: root.data.reasoning;
+                    color: Theme.fg-dim;
+                    font-size: Theme.fs;
+                    font-italic: true;
+                    wrap: word-wrap;
+                }
+                if root.data.text != "" || root.data.streaming: Text {
+                    text: root.data.text + (root.data.streaming ? " ▍" : "");
+                    color: Theme.fg;
+                    font-size: Theme.fs-lg;
+                    wrap: word-wrap;
+                }
+            }
+        }
+
+        if root.data.role == AgentRole.tool: HorizontalLayout {
+            padding-left: 30px;
+            ToolCard { data: root.data; }
+        }
+
+        if root.data.role == AgentRole.notice: HorizontalLayout {
+            alignment: center;
+            Text {
+                text: root.data.text;
+                color: Theme.fg-dim;
+                font-size: Theme.fs-sm;
+                horizontal-alignment: center;
+                wrap: word-wrap;
+            }
+        }
+    }
+}
+
+// The conversation: its messages, scrolled to the newest unless the reader
+// has scrolled up to look at something older.
+component MessageList inherits Rectangle {
+    property <length> offset;
+    property <length> content-h: col.preferred-height;
+    property <length> overflow: Math.max(0px, root.content-h - root.height);
+    /// The reader is at the bottom, so new words carry the view down.
+    property <bool> following: true;
+    property <length> at: Math.max(-root.overflow, Math.min(0px, root.offset));
+
+    clip: true;
+
+    changed content-h => {
+        if (root.following) { root.offset = -root.overflow; }
+    }
+    changed height => {
+        if (root.following) { root.offset = -root.overflow; }
+    }
+    init => { root.offset = -root.overflow; }
+
+    wheel := TouchArea {
+        scroll-event(event) => {
+            root.offset = root.at + event.delta-y;
+            root.following = root.at >= -4px;
+            return EventResult.accept;
+        }
+
+        col := VerticalLayout {
+            y: root.at;
+            height: self.preferred-height;
+            padding: 14px;
+            padding-right: 18px;
+            spacing: 14px;
+
+            for message in AgentChat.messages: MessageRow {
+                data: message;
+                room: root.width - 32px;
+            }
+        }
+    }
+
+    ThinScrollbar {
+        x: parent.width - self.width - 1px;
+        y: 0;
+        height: root.height;
+        viewport: root.height;
+        content: root.content-h;
+        offset: -root.at;
+        scrolled(to) => {
+            root.offset = -to;
+            root.following = root.at >= -4px;
+        }
+    }
+}
+
+// The conversation before its first message.
+component Welcome inherits Rectangle {
+    callback suggested(text: string);
+
+    VerticalLayout {
+        alignment: center;
+        padding: 20px;
+        spacing: 16px;
+
+        VerticalLayout {
+            alignment: center;
+            spacing: 8px;
+
+            HorizontalLayout {
+                alignment: center;
+                Rectangle {
+                    width: 40px;
+                    height: 40px;
+                    border-radius: 20px;
+                    background: Theme.accent-soft;
+                    Icon {
+                        glyph: Glyph.sparkle;
+                        size: 20px;
+                        tint: Theme.accent;
+                    }
+                }
+            }
+            Text {
+                text: I18n.t("agent.welcomeTitle");
+                color: Theme.fg;
+                font-size: Theme.fs-xl;
+                font-weight: Theme.weight-title;
+                horizontal-alignment: center;
+            }
+            Text {
+                text: I18n.t("agent.welcomeBody");
+                color: Theme.fg-muted;
+                font-size: Theme.fs;
+                horizontal-alignment: center;
+                wrap: word-wrap;
+            }
+        }
+
+        VerticalLayout {
+            spacing: 6px;
+            for line in AgentChat.suggestions: Rectangle {
+                height: 34px;
+                background: touch.has-hover ? Theme.field-hover : Theme.field;
+                border-radius: Theme.r;
+
+                HorizontalLayout {
+                    padding-left: 12px;
+                    padding-right: 12px;
+                    spacing: 8px;
+                    VerticalLayout {
+                        alignment: center;
+                        Icon {
+                            glyph: Glyph.sparkle;
+                            size: 12px;
+                            tint: Theme.fg-dim;
+                        }
+                    }
+                    Text {
+                        text: line;
+                        color: Theme.fg;
+                        font-size: Theme.fs;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+                }
+                touch := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => { root.suggested(line); }
+                }
+            }
+        }
+    }
+}
+
+// There is no agent to talk to: say why, and what can be done about it.
+component StatusPage inherits Rectangle {
+    VerticalLayout {
+        alignment: center;
+        padding: 24px;
+        spacing: 10px;
+
+        HorizontalLayout {
+            alignment: center;
+            Rectangle {
+                width: 40px;
+                height: 40px;
+                border-radius: 20px;
+                background: AgentChat.status == AgentStatus.failed ? Theme.danger-soft
+                    : Theme.field;
+                Icon {
+                    glyph: AgentChat.status == AgentStatus.connecting ? Glyph.clock
+                        : AgentChat.status == AgentStatus.failed ? Glyph.alert
+                        : Glyph.import;
+                    size: 18px;
+                    tint: AgentChat.status == AgentStatus.failed ? Theme.danger : Theme.fg-muted;
+                }
+            }
+        }
+        Text {
+            text: AgentChat.status == AgentStatus.connecting ? I18n.t("agent.connecting")
+                : AgentChat.status == AgentStatus.missing ? I18n.t("agent.missingTitle")
+                : I18n.t("agent.failedTitle");
+            color: Theme.fg;
+            font-size: Theme.fs-xl;
+            font-weight: Theme.weight-title;
+            horizontal-alignment: center;
+        }
+        Text {
+            text: AgentChat.status-detail != "" ? AgentChat.status-detail
+                : AgentChat.status == AgentStatus.connecting ? I18n.t("agent.connectingBody")
+                : AgentChat.status == AgentStatus.missing ? I18n.t("agent.missingBody")
+                : I18n.t("agent.failedBody");
+            color: Theme.fg-muted;
+            font-size: Theme.fs;
+            horizontal-alignment: center;
+            wrap: word-wrap;
+        }
+        if AgentChat.status != AgentStatus.connecting: HorizontalLayout {
+            alignment: center;
+            spacing: 8px;
+            padding-top: 6px;
+            if AgentChat.status == AgentStatus.missing: Button {
+                label: I18n.t("agent.howToInstall");
+                clicked => { AgentChat.open-help(); }
+            }
+            Button {
+                primary: true;
+                label: AgentChat.status == AgentStatus.missing ? I18n.t("agent.checkAgain")
+                    : I18n.t("agent.retry");
+                clicked => { AgentChat.retry(); }
+            }
+        }
+    }
+}
+
+// One conversation in the list: open it, rename it, delete it.
+component SessionRow inherits Rectangle {
+    in property <AgentSession> data;
+    in property <bool> renaming;
+    in property <bool> confirming;
+
+    callback open();
+    callback rename-begin();
+    callback rename-done(title: string);
+    callback delete-begin();
+    callback delete-done();
+    callback cancel();
+
+    property <string> draft: root.data.title;
+    property <bool> lit: touch.has-hover || root.renaming || root.confirming;
+
+    height: 52px;
+    border-radius: Theme.r;
+    background: root.data.current ? Theme.accent-soft
+        : root.lit ? Theme.field-hover : Colors.transparent;
+
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => {
+            if (!root.renaming && !root.confirming) { root.open(); }
+        }
+    }
+
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 8px;
+        spacing: 8px;
+
+        VerticalLayout {
+            alignment: center;
+            if root.data.running: Rectangle {
+                width: 8px;
+                height: 8px;
+                border-radius: 4px;
+                background: Theme.accent;
+            }
+            if !root.data.running: Icon {
+                glyph: Glyph.chat;
+                size: 13px;
+                tint: root.data.current ? Theme.accent : Theme.fg-dim;
+            }
+        }
+
+        VerticalLayout {
+            horizontal-stretch: 1;
+            alignment: center;
+            spacing: 2px;
+
+            if !root.renaming: Text {
+                text: root.data.title;
+                color: Theme.fg;
+                font-size: Theme.fs-lg;
+                font-weight: root.data.current ? Theme.weight-title : Theme.weight-body;
+                overflow: elide;
+            }
+            if root.renaming: Rectangle {
+                height: 24px;
+                background: Theme.field-active;
+                border-radius: Theme.r-sm;
+                border-width: 1px;
+                border-color: Theme.accent;
+                name := TextInput {
+                    x: 6px;
+                    width: parent.width - 12px;
+                    height: parent.height;
+                    vertical-alignment: center;
+                    text <=> root.draft;
+                    color: Theme.fg;
+                    font-size: Theme.fs-lg;
+                    single-line: true;
+                    selection-background-color: Theme.accent;
+                    selection-foreground-color: Theme.on-accent;
+                    init => { self.focus(); self.select-all(); }
+                    accepted => { root.rename-done(root.draft); }
+                    key-pressed(event) => {
+                        if (event.text == Key.Escape) {
+                            root.cancel();
+                            return accept;
+                        }
+                        return reject;
+                    }
+                }
+            }
+            Text {
+                text: root.data.detail;
+                color: Theme.fg-dim;
+                font-size: Theme.fs-sm;
+                overflow: elide;
+            }
+        }
+
+        // Rename and delete, there while the row is under the pointer.
+        if root.lit && !root.renaming && !root.confirming: HorizontalLayout {
+            spacing: 2px;
+            VerticalLayout {
+                alignment: center;
+                IconButton {
+                    glyph: Glyph.pencil;
+                    label: I18n.t("agent.rename");
+                    clicked => { root.rename-begin(); }
+                }
+            }
+            VerticalLayout {
+                alignment: center;
+                IconButton {
+                    glyph: Glyph.trash;
+                    danger: true;
+                    label: I18n.t("agent.deleteChat");
+                    clicked => { root.delete-begin(); }
+                }
+            }
+        }
+        if root.renaming: VerticalLayout {
+            alignment: center;
+            IconButton {
+                glyph: Glyph.check;
+                label: I18n.t("agent.done");
+                clicked => { root.rename-done(root.draft); }
+            }
+        }
+        if root.confirming: HorizontalLayout {
+            spacing: 4px;
+            VerticalLayout {
+                alignment: center;
+                Button {
+                    label: I18n.t("common.cancel");
+                    ghost: true;
+                    clicked => { root.cancel(); }
+                }
+            }
+            VerticalLayout {
+                alignment: center;
+                Button {
+                    label: I18n.t("agent.deleteChat");
+                    danger: true;
+                    clicked => { root.delete-done(); }
+                }
+            }
+        }
+    }
+}
+
+// Every conversation, newest first, with a search over them.
+component SessionsPage inherits Rectangle {
+    callback closed();
+
+    property <string> renaming-id;
+    property <string> confirming-id;
+    property <string> query;
+
+    VerticalLayout {
+        padding: 10px;
+        spacing: 8px;
+
+        HorizontalLayout {
+            spacing: 6px;
+
+            Rectangle {
+                horizontal-stretch: 1;
+                height: 28px;
+                background: Theme.field;
+                border-radius: Theme.r;
+
+                HorizontalLayout {
+                    padding-left: 8px;
+                    padding-right: 8px;
+                    spacing: 6px;
+                    VerticalLayout {
+                        alignment: center;
+                        Icon {
+                            glyph: Glyph.search;
+                            size: 12px;
+                            tint: Theme.fg-dim;
+                        }
+                    }
+                    search := TextInput {
+                        horizontal-stretch: 1;
+                        vertical-alignment: center;
+                        color: Theme.fg;
+                        font-size: Theme.fs;
+                        single-line: true;
+                        selection-background-color: Theme.accent;
+                        selection-foreground-color: Theme.on-accent;
+                        edited => {
+                            root.query = self.text;
+                            AgentChat.search-sessions(self.text);
+                        }
+                        Text {
+                            visible: root.query == "";
+                            text: I18n.t("agent.searchChats");
+                            color: Theme.fg-dim;
+                            font-size: Theme.fs;
+                            vertical-alignment: center;
+                        }
+                    }
+                }
+            }
+            Button {
+                primary: true;
+                glyph: Glyph.plus;
+                label: I18n.t("agent.newChat");
+                clicked => { AgentChat.new-session(); root.closed(); }
+            }
+        }
+
+        if AgentChat.sessions.length == 0: Rectangle {
+            vertical-stretch: 1;
+            Text {
+                text: root.query == "" ? I18n.t("agent.noChats") : I18n.t("agent.noMatches");
+                color: Theme.fg-dim;
+                font-size: Theme.fs;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
+        if AgentChat.sessions.length > 0: Flickable {
+            vertical-stretch: 1;
+            content-height: list.preferred-height;
+            list := VerticalLayout {
+                spacing: 2px;
+                for session in AgentChat.sessions: SessionRow {
+                    data: session;
+                    renaming: root.renaming-id == session.id;
+                    confirming: root.confirming-id == session.id;
+                    open => { AgentChat.open-session(session.id); root.closed(); }
+                    rename-begin => { root.confirming-id = ""; root.renaming-id = session.id; }
+                    rename-done(title) => {
+                        root.renaming-id = "";
+                        AgentChat.rename-session(session.id, title);
+                    }
+                    delete-begin => { root.renaming-id = ""; root.confirming-id = session.id; }
+                    delete-done => {
+                        root.confirming-id = "";
+                        AgentChat.delete-session(session.id);
+                    }
+                    cancel => { root.renaming-id = ""; root.confirming-id = ""; }
+                }
+            }
+        }
+    }
+}
+
+// A switch for live mode: the agent edits the project that is open, as you
+// watch, rather than a copy of it.
+component LiveChip inherits Rectangle {
+    in property <bool> on;
+    callback toggled(on: bool);
+
+    height: 22px;
+    border-radius: 11px;
+    background: root.on ? Theme.accent-soft : (touch.has-hover ? Theme.field-hover : Colors.transparent);
+    border-width: 1px;
+    border-color: root.on ? Theme.accent : Theme.line;
+    min-width: row.preferred-width + 16px;
+
+    row := HorizontalLayout {
+        padding-left: 8px;
+        padding-right: 8px;
+        spacing: 6px;
+        VerticalLayout {
+            alignment: center;
+            Rectangle {
+                width: 6px;
+                height: 6px;
+                border-radius: 3px;
+                background: root.on ? Theme.accent : Theme.fg-dim;
+            }
+        }
+        Text {
+            text: I18n.t("agent.live");
+            color: root.on ? Theme.accent : Theme.fg-muted;
+            font-size: Theme.fs-sm;
+            font-weight: Theme.weight-title;
+            vertical-alignment: center;
+        }
+    }
+
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.toggled(!root.on); }
+    }
+    Tip {
+        text: root.on ? I18n.t("agent.liveOn") : I18n.t("agent.liveOff");
+        active: touch.has-hover;
+    }
+}
+
+// What is typed, what rides with it, and the two choices that shape the
+// answer: which model, and how hard it thinks.
+component Composer inherits Rectangle {
+    in property <bool> enabled: true;
+
+    property <string> draft;
+    property <bool> has-text: root.draft != "";
+    property <bool> can-send: root.enabled && !AgentChat.busy
+        && (root.has-text || AgentChat.attachments.length > 0);
+    /// Two lines to start with, growing to eight and scrolling after.
+    property <length> field-h: Math.max(40px, Math.min(160px, input.preferred-height + 4px));
+
+    height: col.preferred-height + 20px;
+
+    function submit() {
+        if (root.can-send) {
+            AgentChat.send(root.draft);
+            root.draft = "";
+            input.text = "";
+        }
+    }
+
+    Rectangle {
+        x: 10px;
+        y: 4px;
+        width: parent.width - 20px;
+        height: parent.height - 14px;
+        background: Theme.field;
+        border-radius: Theme.r-lg;
+        border-width: 1px;
+        border-color: input.has-focus ? Theme.accent : Theme.line;
+
+        col := VerticalLayout {
+            padding: 8px;
+            spacing: 6px;
+
+            if AgentChat.attachments.length > 0: Flickable {
+                height: 40px;
+                content-width: chips.preferred-width;
+                chips := HorizontalLayout {
+                    spacing: 6px;
+                    for file in AgentChat.attachments: AttachmentChip {
+                        data: file;
+                        removable: true;
+                        removed => { AgentChat.attach-remove(file.id); }
+                    }
+                }
+            }
+
+            Rectangle {
+                height: root.field-h;
+                clip: true;
+
+                if !root.has-text: Text {
+                    x: 4px;
+                    y: 2px;
+                    text: I18n.t("agent.placeholder");
+                    color: Theme.fg-dim;
+                    font-size: Theme.fs-lg;
+                }
+                input := TextInput {
+                    x: 4px;
+                    y: 2px;
+                    width: parent.width - 8px;
+                    height: Math.max(self.preferred-height, parent.height - 4px);
+                    color: Theme.fg;
+                    font-size: Theme.fs-lg;
+                    single-line: false;
+                    wrap: word-wrap;
+                    enabled: root.enabled;
+                    selection-background-color: Theme.accent;
+                    selection-foreground-color: Theme.on-accent;
+                    edited => { root.draft = self.text; }
+                    // Return sends; Shift+Return is a new line.
+                    key-pressed(event) => {
+                        if ((event.text == Key.Return || event.text == "\n")
+                            && !event.modifiers.shift) {
+                            root.submit();
+                            return accept;
+                        }
+                        if (event.text == Key.Home) {
+                            self.set-selection-offsets(0, 0);
+                            return accept;
+                        }
+                        if (event.text == Key.End) {
+                            self.set-selection-offsets(1000000000, 1000000000);
+                            return accept;
+                        }
+                        return reject;
+                    }
+                }
+            }
+
+            HorizontalLayout {
+                spacing: 4px;
+                height: 28px;
+
+                IconButton {
+                    glyph: Glyph.attach;
+                    label: I18n.t("agent.attach");
+                    enabled: root.enabled;
+                    clicked => { AgentChat.attach-pick(); }
+                }
+                Select {
+                    flat: true;
+                    snug: true;
+                    options: AgentChat.models;
+                    current: AgentChat.model-index;
+                    enabled: root.enabled && !AgentChat.busy;
+                    changed(index) => {
+                        AgentChat.model-index = index;
+                        AgentChat.model-changed(index);
+                    }
+                }
+                Select {
+                    flat: true;
+                    snug: true;
+                    glyph: Glyph.sparkle;
+                    options: AgentChat.efforts;
+                    current: AgentChat.effort-index;
+                    enabled: root.enabled && !AgentChat.busy;
+                    changed(index) => {
+                        AgentChat.effort-index = index;
+                        AgentChat.effort-changed(index);
+                    }
+                }
+                Rectangle { horizontal-stretch: 1; }
+
+                // Send, or stop while a turn runs.
+                Rectangle {
+                    width: 28px;
+                    height: 28px;
+                    border-radius: 14px;
+                    background: AgentChat.busy ? Theme.fg
+                        : root.can-send ? (send-touch.has-hover ? Theme.accent-hover : Theme.accent)
+                        : Theme.field-active;
+                    Icon {
+                        glyph: AgentChat.busy ? Glyph.stop : Glyph.send;
+                        size: 14px;
+                        tint: AgentChat.busy ? Theme.panel
+                            : root.can-send ? Theme.on-accent : Theme.fg-dim;
+                    }
+                    send-touch := TouchArea {
+                        enabled: AgentChat.busy || root.can-send;
+                        mouse-cursor: pointer;
+                        clicked => {
+                            if (AgentChat.busy) { AgentChat.stop(); } else { root.submit(); }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+export component AgentPane inherits Pane {
+    in property <int> pane-seat;
+    in property <bool> pane-removable: true;
+    callback pane-picked(kind: PaneKind);
+    callback pane-removed();
+
+    /// The conversations list is up instead of the conversation.
+    property <bool> listing;
+
+    PaneHeader {
+        title: root.listing ? I18n.t("agent.chats") : I18n.t("agent.title");
+
+        VerticalLayout {
+            alignment: center;
+            IconButton {
+                glyph: Glyph.plus;
+                label: I18n.t("agent.newChat");
+                enabled: AgentChat.status == AgentStatus.ready;
+                clicked => {
+                    root.listing = false;
+                    AgentChat.new-session();
+                }
+            }
+        }
+        VerticalLayout {
+            alignment: center;
+            IconButton {
+                glyph: Glyph.clock;
+                label: I18n.t("agent.chats");
+                checked: root.listing;
+                clicked => { root.listing = !root.listing; }
+            }
+        }
+        VerticalLayout {
+            alignment: center;
+            PaneSwitcher {
+                kind: PaneKind.agent;
+                seat: root.pane-seat;
+                removable: root.pane-removable;
+                picked(kind) => { root.pane-picked(kind); }
+                removed => { root.pane-removed(); }
+            }
+        }
+    }
+
+    // The strip under the header: which conversation, in which project, and
+    // whether the agent works on what is open.
+    if !root.listing && AgentChat.status == AgentStatus.ready: Rectangle {
+        height: 34px;
+        Rectangle {
+            y: parent.height - 1px;
+            height: 1px;
+            background: Theme.line;
+        }
+        HorizontalLayout {
+            padding-left: Theme.pad;
+            padding-right: 10px;
+            spacing: 8px;
+            Text {
+                horizontal-stretch: 1;
+                text: AgentChat.title != "" ? AgentChat.title : I18n.t("agent.newChat");
+                color: Theme.fg-muted;
+                font-size: Theme.fs;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+            if AgentChat.project != "": Text {
+                text: AgentChat.project;
+                color: Theme.fg-dim;
+                font-size: Theme.fs-sm;
+                vertical-alignment: center;
+                overflow: elide;
+                max-width: 120px;
+            }
+            VerticalLayout {
+                alignment: center;
+                LiveChip {
+                    on: AgentChat.live;
+                    toggled(on) => {
+                        AgentChat.live = on;
+                        AgentChat.live-changed(on);
+                    }
+                }
+            }
+        }
+    }
+
+    if root.listing: SessionsPage {
+        vertical-stretch: 1;
+        closed => { root.listing = false; }
+    }
+    if !root.listing && AgentChat.status != AgentStatus.ready: StatusPage {
+        vertical-stretch: 1;
+    }
+    if !root.listing && AgentChat.status == AgentStatus.ready
+        && AgentChat.messages.length == 0: Welcome {
+        vertical-stretch: 1;
+        suggested(text) => { AgentChat.send(text); }
+    }
+    if !root.listing && AgentChat.status == AgentStatus.ready
+        && AgentChat.messages.length > 0: MessageList {
+        vertical-stretch: 1;
+    }
+
+    if !root.listing: Composer {
+        enabled: AgentChat.status == AgentStatus.ready;
+    }
+}

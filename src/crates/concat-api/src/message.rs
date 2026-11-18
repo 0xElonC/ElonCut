@@ -246,6 +246,29 @@ pub enum Request {
     },
 }
 
+impl Request {
+    /// The project folder this request is about, for the requests that name
+    /// one. A media file's path (`MediaProbe`) is not a project.
+    pub fn project_path(&self) -> Option<&str> {
+        match self {
+            Request::ProjectOpen { path }
+            | Request::ProjectClose { path, .. }
+            | Request::ProjectGet { path }
+            | Request::ProjectDocument { path }
+            | Request::ProjectSave { path, .. }
+            | Request::ProjectSetVideo { path, .. }
+            | Request::EditApply { path, .. }
+            | Request::EditUndo { path }
+            | Request::EditRedo { path }
+            | Request::MediaImport { path, .. }
+            | Request::TemplateSave { path, .. }
+            | Request::ExportRun { path, .. }
+            | Request::PreviewFrame { path, .. } => Some(path),
+            _ => None,
+        }
+    }
+}
+
 /// One template slot and the file that takes it.
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[derive(Clone, PartialEq, Debug, Serialize, Deserialize)]

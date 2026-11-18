@@ -1,0 +1,14 @@
+[package]
+name = "concat-agent"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "The agent behind the window's chat: a client of the Codex app-server on this computer, with its models, settings and sign-in."
+
+[dependencies]
+serde_json.workspace = true
+log = "0.4"
+
+[lints]
+workspace = true

@@ -192,6 +192,16 @@ export enum Glyph {
     move,
     wand,
     sliders,
+    /// the agent pane's mark: a speech bubble
+    chat,
+    /// an arrow up, to send a message
+    send,
+    /// a paperclip, to attach a file
+    attach,
+    /// a pencil, to rename
+    pencil,
+    /// a wrench: a tool call
+    tool,
 }
 
 component Stroked inherits Path {
@@ -493,6 +503,40 @@ export component Icon inherits Rectangle {
         size: root.size; tint: root.tint; weight: root.weight;
         commands: "M8.3 10a.7.7 0 0 1-.626-1.079L11.4 3a.7.7 0 0 1 1.198-.043L16.3 8.9"
             + "a.7.7 0 0 1-.572 1.1Z M3 14h7v7H3z M14 17.5a3.5 3.5 0 1 0 7 0a3.5 3.5 0 1 0 -7 0";
+    }
+
+    // lucide/message-square
+    if root.glyph == Glyph.chat: Stroked {
+        size: root.size; tint: root.tint; weight: root.weight;
+        commands: "M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z";
+    }
+
+    // lucide/arrow-up
+    if root.glyph == Glyph.send: Stroked {
+        size: root.size; tint: root.tint; weight: root.weight;
+        commands: "M5 12l7-7 7 7 M12 19V5";
+    }
+
+    // lucide/paperclip
+    if root.glyph == Glyph.attach: Stroked {
+        size: root.size; tint: root.tint; weight: root.weight;
+        commands: "M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84"
+            + "l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48";
+    }
+
+    // lucide/pencil
+    if root.glyph == Glyph.pencil: Stroked {
+        size: root.size; tint: root.tint; weight: root.weight;
+        commands: "M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352"
+            + "a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z M15 5l4 4";
+    }
+
+    // lucide/wrench
+    if root.glyph == Glyph.tool: Stroked {
+        size: root.size; tint: root.tint; weight: root.weight;
+        commands: "M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.106-3.105"
+            + "c.32-.322.863-.22.983.218a6 6 0 0 1-8.259 7.057l-7.91 7.91a1 1 0 0 1-2.999-3"
+            + "l7.91-7.91a6 6 0 0 1 7.057-8.259c.438.12.54.662.219.984z";
     }
 
     // lucide/chevron-up

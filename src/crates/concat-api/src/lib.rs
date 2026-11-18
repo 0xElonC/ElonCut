@@ -228,6 +228,33 @@ impl OpenProjects {
     }
 }
 
+/// The project open in a window, reached from outside it: what lets an
+/// agent edit the cut on screen while the person watches, rather than a
+/// project of its own (live mode).
+///
+/// The window answers on its own thread, so every edit is the edit a click
+/// would have made - undoable with the same Undo, drawn by the same
+/// panes - and a read is of what is on screen at that moment. A method
+/// that cannot be answered (the window is closing, or busy past a few
+/// seconds) returns the reason as its error.
+pub trait Live: Send + Sync {
+    /// The folder of the project the window has open, or `None` on its
+    /// launch screen.
+    fn path(&self) -> Option<String>;
+    /// The project as it stands now, as a session to read from: frames,
+    /// exports and the document come from it. Its history is empty.
+    fn snapshot(&self) -> Result<Session, String>;
+    /// Applies an edit as the window's own, and answers with the state
+    /// after it.
+    fn apply(&self, command: Command) -> Result<EditorView, String>;
+    /// The window's Undo.
+    fn undo(&self) -> Result<EditorView, String>;
+    /// The window's Redo.
+    fn redo(&self) -> Result<EditorView, String>;
+    /// The window's Save.
+    fn save(&self) -> Result<(), String>;
+}
+
 /// The dispatcher: the open sessions and the services behind them.
 pub struct Api {
     dirs: AppDirs,
@@ -252,6 +279,8 @@ pub struct Api {
     book: Arc<job::Book>,
     /// [`VersionInfo::capabilities`], in the order they were added.
     capabilities: Vec<String>,
+    /// A window's open project, reachable as one of this API's own.
+    live: Option<Arc<dyn Live>>,
 }
 
 /// A way to stop the jobs of one [`Api`] from any thread, without waiting
@@ -311,7 +340,29 @@ impl Api {
             jobs: Jobs::default(),
             dirs,
             capabilities: CAPABILITIES.iter().map(|name| (*name).to_owned()).collect(),
+            live: None,
         }
+    }
+
+    /// Lets callers of this API reach the project a window has open, by
+    /// its folder, as live mode: reads see what is on screen and edits are
+    /// the window's own.
+    pub fn set_live(&mut self, live: Arc<dyn Live>) {
+        self.live = Some(live);
+    }
+
+    /// The window's project, if `path` names it.
+    fn live_at(&self, path: &str) -> Option<Arc<dyn Live>> {
+        let live = self.live.as_ref()?;
+        (key_of(&live.path()?) == key_of(path)).then(|| Arc::clone(live))
+    }
+
+    /// Puts what the window has on screen where this API's own sessions
+    /// are, so everything that reads a session reads that.
+    fn refresh_live(&mut self, path: &str, live: &Arc<dyn Live>) -> Result<(), ApiError> {
+        let session = live.snapshot().map_err(ApiError::failed)?;
+        self.sessions.insert(key_of(path), session);
+        Ok(())
     }
 
     /// The directories this API works under.
@@ -440,6 +491,32 @@ impl Api {
 
     fn run(&mut self, request: Request) -> Result<Reply, ApiError> {
         let view = |view: EditorView| Ok(Reply::View(Box::new(view)));
+        // A request about the project the window has open is about what is
+        // on screen: read it afresh, and let the window make the edits.
+        if let Some(path) = request.project_path()
+            && let Some(live) = self.live_at(path)
+        {
+            let path = path.to_owned();
+            self.refresh_live(&path, &live)?;
+            match &request {
+                Request::ProjectClose { .. } => return Ok(Reply::Done(Done {})),
+                Request::EditUndo { .. } => return view(live.undo().map_err(refused)?),
+                Request::EditRedo { .. } => return view(live.redo().map_err(refused)?),
+                Request::ProjectSave { .. } => {
+                    live.save().map_err(ApiError::failed)?;
+                    return Ok(Reply::Done(Done {}));
+                }
+                Request::ProjectSetVideo { video, .. } => {
+                    let timeline_id = self.session(&path)?.project().active_timeline_id.clone();
+                    let video = *video;
+                    return view(
+                        live.apply(Command::SetTimelineVideo { timeline_id, video })
+                            .map_err(refused)?,
+                    );
+                }
+                _ => {}
+            }
+        }
         match request {
             Request::Version => Ok(Reply::Version(self.version())),
             Request::ProjectCreate {
@@ -613,6 +690,9 @@ impl Api {
 
     /// [`Request::EditApply`].
     pub fn apply(&mut self, path: &str, command: Command) -> Result<EditorView, ApiError> {
+        if let Some(live) = self.live_at(path) {
+            return live.apply(command).map_err(refused);
+        }
         self.session_mut(path)?.apply(command).map_err(refused)
     }
 
@@ -1265,6 +1345,107 @@ mod tests {
             video: None,
         }));
         scratch.path().join(name).to_string_lossy().into_owned()
+    }
+
+
+    /// A stand-in for a window: a session of its own that the API reaches
+    /// through [`Live`], counting what is done to it.
+    struct Window {
+        path: String,
+        session: Mutex<Session>,
+        edits: std::sync::atomic::AtomicUsize,
+        saves: std::sync::atomic::AtomicUsize,
+    }
+
+    impl Live for Window {
+        fn path(&self) -> Option<String> {
+            Some(self.path.clone())
+        }
+        fn snapshot(&self) -> Result<Session, String> {
+            let session = self.session.lock().expect("session");
+            Session::detached(session.path(), session.settings(), &session.document())
+        }
+        fn apply(&self, command: Command) -> Result<EditorView, String> {
+            self.edits.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            self.session.lock().expect("session").apply(command)
+        }
+        fn undo(&self) -> Result<EditorView, String> {
+            Ok(self.session.lock().expect("session").undo())
+        }
+        fn redo(&self) -> Result<EditorView, String> {
+            Ok(self.session.lock().expect("session").redo())
+        }
+        fn save(&self) -> Result<(), String> {
+            self.saves.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn a_window_project_is_read_as_it_is_and_edited_through_the_window() {
+        let (mut api, scratch, _events) = api();
+        let path = project(&mut api, &scratch, "Live");
+        // The window has it open: its own session, not the API's.
+        let window_session = {
+            ok(api.dispatch(Request::ProjectClose { path: path.clone(), save: false }));
+            let info = projects::open(&path).expect("opens");
+            Session::open_info(&info).expect("session")
+        };
+        let window = Arc::new(Window {
+            path: path.clone(),
+            session: Mutex::new(window_session),
+            edits: Default::default(),
+            saves: Default::default(),
+        });
+        api.set_live(window.clone());
+
+        // Opening is allowed - the claim is the window's - and shows the
+        // window's project.
+        let opened = view(ok(api.dispatch(Request::ProjectOpen { path: path.clone() })));
+        assert!(opened.project.media.is_empty());
+
+        // An edit is the window's: it lands there, and the next read of the
+        // API sees it, though the API never held the session.
+        let edited = view(ok(api.dispatch(Request::EditApply {
+            path: path.clone(),
+            command: Box::new(Command::AddMedia { item: still("/x/still.png") }),
+        })));
+        assert_eq!(edited.project.media.len(), 1);
+        assert_eq!(window.edits.load(std::sync::atomic::Ordering::SeqCst), 1);
+        let read = view(ok(api.dispatch(Request::ProjectGet { path: path.clone() })));
+        assert_eq!(read.project.media.len(), 1);
+
+        // The window's own undo, and its own save.
+        let undone = view(ok(api.dispatch(Request::EditUndo { path: path.clone() })));
+        assert!(undone.project.media.is_empty());
+        ok(api.dispatch(Request::ProjectSave { path: path.clone(), name: None }));
+        assert_eq!(window.saves.load(std::sync::atomic::Ordering::SeqCst), 1);
+
+        // Closing from the API does not close the window's project.
+        ok(api.dispatch(Request::ProjectClose { path: path.clone(), save: true }));
+        assert_eq!(window.saves.load(std::sync::atomic::Ordering::SeqCst), 1);
+        let again = view(ok(api.dispatch(Request::ProjectGet { path })));
+        assert!(again.project.media.is_empty());
+    }
+
+    #[test]
+    fn a_project_the_window_does_not_have_open_is_the_apis_own() {
+        let (mut api, scratch, _events) = api();
+        let path = project(&mut api, &scratch, "Mine");
+        let other = project(&mut api, &scratch, "Theirs");
+        let info = projects::open(&other).expect("opens");
+        let window = Arc::new(Window {
+            path: other.clone(),
+            session: Mutex::new(Session::open_info(&info).expect("session")),
+            edits: Default::default(),
+            saves: Default::default(),
+        });
+        api.set_live(window.clone());
+        view(ok(api.dispatch(Request::EditApply {
+            path,
+            command: Box::new(Command::AddMedia { item: still("/x/still.png") }),
+        })));
+        assert_eq!(window.edits.load(std::sync::atomic::Ordering::SeqCst), 0);
     }
 
     #[test]
