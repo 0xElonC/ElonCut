@@ -117,6 +117,9 @@ struct Controller {
     minted: u64,
     /// What the pane last said the project was called.
     shown_project: String,
+    /// The person is at the composer: a file dropped on the window is
+    /// meant for the agent. Ended by a press anywhere else in the editor.
+    engaged: bool,
 }
 
 thread_local! {
@@ -686,6 +689,13 @@ impl Controller {
         ))
     }
 
+    fn add_files(&mut self, paths: Vec<PathBuf>) {
+        for path in paths.into_iter().filter(|path| path.is_file()) {
+            let id = self.mint("a");
+            self.attachments.push(attached(id, &path));
+        }
+    }
+
     fn fail_turn(&mut self, reason: &str) {
         self.busy = false;
         self.turn = None;
@@ -936,6 +946,7 @@ pub fn install(app: &App) {
         bridge: None,
         minted: 0,
         shown_project: String::new(),
+        engaged: false,
     };
     CONTROLLER.with(|slot| *slot.borrow_mut() = Some(controller));
 
@@ -995,13 +1006,11 @@ pub fn install(app: &App) {
         // The dialog is asked with nothing borrowed, as every dialog is.
         let picked = crate::platform::pick_files("Attach", None).unwrap_or_default();
         with(move |c, shell, app| {
-            for path in picked {
-                let id = c.mint("a");
-                c.attachments.push(attached(id, &path));
-            }
+            c.add_files(picked);
             c.publish(shell, app);
         });
     });
+    chat.on_composer_focused(|| with(|c, _, _| c.engaged = true));
     chat.on_model_changed(|index| {
         with(|c, shell, app| {
             let kept = c.effort_id();
@@ -1072,6 +1081,36 @@ pub fn shutdown() {
             if let Some(server) = controller.bridge.take() {
                 server.stop_detached();
             }
+        }
+    });
+}
+
+/// A press landed somewhere else in the editor: files dropped next belong
+/// to the library again.
+pub fn disengage() {
+    CONTROLLER.with(|slot| {
+        if let Some(controller) = slot.borrow_mut().as_mut() {
+            controller.engaged = false;
+        }
+    });
+}
+
+/// Whether files dropped on the window now are for the agent: its pane is
+/// on screen and the person was last at its composer.
+pub fn wants_drop(shell: &Shell) -> bool {
+    let engaged = CONTROLLER.with(|slot| slot.borrow().as_ref().is_some_and(|c| c.engaged));
+    engaged && {
+        let studio = shell.studio.borrow();
+        !studio.on_start && studio.dock.contains(crate::ui::PaneKind::Agent)
+    }
+}
+
+/// Puts dropped files in the composer, to go with the next message.
+pub fn attach(shell: &Shell, app: &App, paths: Vec<PathBuf>) {
+    CONTROLLER.with(|slot| {
+        if let Some(controller) = slot.borrow_mut().as_mut() {
+            controller.add_files(paths);
+            controller.publish(shell, app);
         }
     });
 }

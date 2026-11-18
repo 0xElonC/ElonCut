@@ -126,6 +126,9 @@ export global AgentChat {
     callback send(text: string);
     callback stop();
     callback attach-pick();
+    /// The composer took the keyboard: files dropped on the window now go
+    /// to the agent, not the library, until something else is pressed.
+    callback composer-focused();
     callback attach-remove(id: string);
     callback new-session();
     callback open-session(id: string);
@@ -991,6 +994,9 @@ component Composer inherits Rectangle {
                     selection-background-color: Theme.accent;
                     selection-foreground-color: Theme.on-accent;
                     edited => { root.draft = self.text; }
+                    changed has-focus => {
+                        if (self.has-focus) { AgentChat.composer-focused(); }
+                    }
                     // Return sends; Shift+Return is a new line.
                     key-pressed(event) => {
                         if ((event.text == Key.Return || event.text == "\n")

@@ -295,6 +295,12 @@ fn start(project: Option<std::path::PathBuf>, smoke: Smoke) -> Result<(), slint:
     let gpu = platform::select_backend(
         |paths| {
             Shell::with(|shell, app| {
+                // With the agent's composer where the person last was, the
+                // files are for the agent, to go with its next message.
+                if agent::wants_drop(shell) {
+                    agent::attach(shell, &app, paths);
+                    return;
+                }
                 {
                     let mut studio = shell.studio.borrow_mut();
                     // Sound files dropped while the library shows its
@@ -1894,7 +1900,10 @@ fn start(project: Option<std::path::PathBuf>, smoke: Smoke) -> Result<(), slint:
     // A press on any pane's floor takes focus back from the field that had
     // it; see Editor.blur. The chords that are also menu rows go through the
     // menu's handler, so the key and the row cannot come apart.
-    editor.on_blur(|| Shell::with(|_, app| app.invoke_blur()));
+    editor.on_blur(|| {
+        agent::disengage();
+        Shell::with(|_, app| app.invoke_blur());
+    });
     // A field that is done being typed into - Enter, Escape - releases the
     // focus the same way, rather than clearing it: a cleared focus is a
     // window where no key reaches anything. See Focus in util.slint.

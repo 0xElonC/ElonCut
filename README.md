@@ -1,150 +1,74 @@
-<p align="center">
-  <img src="https://cdn.jsdelivr.net/gh/jub0t/Concat@main/assets/concat-mark-dark.png" alt="Concat" width="100" />
-</p>
-
-<h1 align="center">Concat</h1>
-<h3 align="center">The free, open-source, cross-platform video editor.</h3>
-
-<div align="center">
-
-<img src="https://cdn.jsdelivr.net/gh/jub0t/Concat@main/assets/editor.png" alt="Concat editor" width="100%" />
+<h1 align="center">ElonCut</h1>
+<h3 align="center">A free, local video editor you can talk to.</h3>
 
 <p align="center">
-  <a href="https://github.com/jub0t/Concat/releases"><img src="https://img.shields.io/github/downloads/jub0t/concat/total?style=flat&logo=github&logoColor=F8F8F8&label=Downloads&labelColor=212123&color=0568FD" alt="Total Downloads" /></a>
-  <a href="https://github.com/jub0t/Concat/actions/workflows/ci.yml"><img src="https://img.shields.io/github/actions/workflow/status/jub0t/Concat/ci.yml?style=flat&logo=githubactions&logoColor=F8F8F8&label=Build&labelColor=000000" alt="Build Status" /></a>
-  <a href="https://github.com/jub0t/Concat/releases"><img src="https://img.shields.io/badge/Version-0.2.11-0568FD?style=flat&logo=semver&logoColor=F8F8F8&labelColor=212123" alt="Concat Version 0.2.11" /></a>
-  <a href="https://discord.gg/DVuPfpXfqP"><img src="https://img.shields.io/badge/Discord-Join%20the%20server-5865F2?style=flat&logo=discord&logoColor=F8F8F8&labelColor=000000" alt="Join Concat Discord" /></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/License-AGPL%20v3-0568FD?style=flat&logo=gnu&logoColor=F8F8F8&labelColor=212123" alt="License: AGPL-3.0-or-later" /></a>
+  <b>English</b> · <a href="#简体中文">简体中文</a>
 </p>
-
-<p align="center">
-  <a href="https://www.star-history.com/jub0t/concat"><img src="https://api.star-history.com/badge?repo=jub0t/concat&type=rank" alt="Star History Rank" height="62" /></a>
-  <a href="https://concat.standalones.org/#download"><img src="assets/download_button.svg" alt="Download Concat" width="251" /></a>
-  <a href="https://trendshift.io/repositories/191379?utm_source=repository-badge&amp;utm_medium=badge&amp;utm_campaign=badge-repository-191379" target="_blank" rel="noopener noreferrer"><img src="https://trendshift.io/api/badge/repositories/191379" alt="jub0t%2FConcat | Trendshift" width="250" height="55"/></a>
-</p>
-
-**🇬🇧 English** · [🇩🇪 Deutsch](docs/README.de.md) · [🇪🇸 Español](docs/README.es.md) · [🇫🇷 Français](docs/README.fr.md) · [🇮🇹 Italiano](docs/README.it.md) · [🇳🇱 Nederlands](docs/README.nl.md) · [🇵🇱 Polski](docs/README.pl.md) · [🇧🇷 Português (Brasil)](docs/README.pt-BR.md) · [🇷🇺 Русский](docs/README.ru.md) · [🇺🇦 Українська](docs/README.uk.md) · [🇹🇷 Türkçe](docs/README.tr.md) · [🇦🇿 Azərbaycanca](docs/README.az.md) · [🇭🇷 Hrvatski](docs/README.hr.md) · [🇮🇩 Bahasa Indonesia](docs/README.id.md) · [🇻🇳 Tiếng Việt](docs/README.vi.md) · [🇹🇭 ไทย](docs/README.th.md) · [🇯🇵 日本語](docs/README.ja.md) · [🇰🇷 한국어](docs/README.ko.md) · [🇨🇳 简体中文](docs/README.zh-Hans.md) · [🇹🇼 繁體中文](docs/README.zh-TW.md) · [🇸🇦 العربية](docs/README.ar.md) · [🇮🇱 עברית](docs/README.he.md) · [🇮🇷 فارسی](docs/README.fa.md) · [🇮🇳 हिन्दी](docs/README.hi.md) · [🇵🇰 اردو](docs/README.ur.md) · [🇧🇩 বাংলা](docs/README.bn.md)
-
-## Paid Sponsors
-
-<table width="100%">
-  <tr>
-    <td align="center">
-      <a href="https://proxyon.io/?ref=concat"><img src="https://cdn.jsdelivr.net/gh/jub0t/Concat@main/assets/proxyon_sponsor_logo.png" alt="Proxyon" width="80" /></a><br />
-      <a href="https://proxyon.io/?ref=concat"><b>Proxyon</b></a><br />
-      <sub>Pay-as-you-go proxies for developers<br />Use code <code>JUB0T</code> for 20% off</sub>
-    </td>
-      <td align="center">
-      <a href="mailto:jub0trd@gmail.com"><b>Contact to advertise</b></a><br />
-      <sub>Put your product in front of the people who edit with Concat.<br /><a href="mailto:jub0trd@gmail.com">jub0trd@gmail.com</a></sub>
-    </td>
-  </tr>
-</table>
-
-</div>
-
 
 ## About
 
-Concat is a free, open-source video editor for macOS, Windows, Linux and Android. It covers what most edits need: auto-captions, text-to-speech, background removal, keyframe animation, effects and titles, multi-track cutting, 4K export. With none of the catches: no watermark, no account, no subscription, no upload.
+ElonCut is a free, open-source video editor for macOS, Windows and Linux, with an **Agent pane**: a chat docked beside the timeline where you describe an edit, attach footage or reference photos, and an agent cuts it for you, on the project you have open, while you watch.
 
-Everything runs on your machine. Install it, drop in footage, cut. The AI models for captions, voices and cutout download once from Settings and work offline after that. Your footage never leaves your disk.
+The editor underneath is complete on its own: multi-track timeline, keyframes, effects, titles, auto-captions, text-to-speech, background removal, 4K export, no watermark, no account. Everything runs on your machine.
 
-**Good for:** TikTok, Reels and Shorts, YouTube videos, tutorials and screen recordings, podcast clips, memes.
+## The Agent pane
 
-**Also for machines:** a built-in MCP server for AI agents (`concat --mcp`, [set up](docs/MCP.md)) and a JSON-RPC API for scripts, so they can cut video with it too.
+The agent is the **[Codex](https://developers.openai.com/codex/cli) already installed on your computer**. ElonCut uses its models, its reasoning depth and its sign-in as they are in `~/.codex/config.toml`; nothing is copied into the app and no key is asked for.
 
-## Highlights
+- **Chat that edits.** The agent edits through the built-in [MCP server](docs/MCP.md): cut, trim, move, titles, captions, effects, keyframes, export, and a look at any frame to check its work.
+- **Live mode.** With **Live** on, the agent edits the project open in the window. Each edit is drawn at once, joins the window's history and is undone with the same Undo. With it off, the agent never touches the open project.
+- **Photos, videos and files.** Attach with the paperclip, or drag files onto the window after clicking in the message box. Photos are shown to the model; videos and other files are handed over as paths, to be imported with the tools.
+- **Model and depth.** Pick the model and the reasoning depth beside the message box. The first choice is whatever your own Codex settings use.
+- **Conversations.** Start, search, rename, delete and resume conversations from the clock button. A conversation comes back with its whole history.
+- **Free to act.** The agent runs without approval prompts and its commands are not sandboxed: it can do on this computer what you can. Turn Live off and read what it does if that is not what you want.
 
-- 🚫 **No watermarks. No account. No paywall.** Ever.
-- 🔒 **100% local.** Nothing uploads. Works offline.
-- 💬 **Auto-captions.** Made on your machine. Pick a model size, get styled captions on the timeline.
-- 🗣️ **Text-to-speech + voice cloning.** A free local voice on the desktop, or any voice from a few seconds of a recording. Phones are getting their own system voice.
-- 🧍 **Background removal.** People, objects, or paint the mask yourself.
-- 🎞️ **Keyframes.** Position, scale, rotation, opacity, volume, effect parameters. Curve editor built in.
-- ✨ **100 effects, filters and transitions.** Live in the preview.
-- ✂️ **Cut fast.** Split, trim, ripple, merge, freeze frame, speed. Magnetic timeline if you want it.
-- 🎚️ **Multi-track, multi-timeline.** Overlays and picture-in-picture: stack video, stills and titles on as many tracks as you like. Several cuts in one project. Blend modes (screen, add, multiply…), crop, flips.
-- 📝 **Titles.** Fonts, stroke, shadow, background plate. Presets to start from.
-- 🎙️ **One-switch voice cleanup.** Denoise, enhance voice, level the loudness. Plus chipmunk, robot, telephone and friends.
-- 📤 **Export.** H.264, HEVC, AV1. Up to 4K 60, 10-bit colour.
-- ⚡ **Fast.** Proxies built in, so 4K scrubs smoothly.
-- 🤖 **Scriptable.** An MCP server built in, so Claude and other AI agents can edit with it ([one line to set up](docs/MCP.md)), and a JSON-RPC API for scripts. A build from source adds gRPC and a command-line tool.
-- 🖥️ **macOS, Windows, Linux, Android.** 26 languages. Same app, same project files.
+Add the pane from the dropdown at the corner of any panel, like the Library or the Timeline.
 
-## Download
-
-Two ways in:
-
-1. **[The website](https://concat.standalones.org/#download)** hands you the right build for your machine. Start here.
-2. **[GitHub Releases](https://github.com/jub0t/Concat/releases)** has every build for every platform, with installers, packages and checksums. For when you want to pick.
-
-Concat is in **beta**: it works, and it still has edges. [Say so](https://github.com/jub0t/Concat/issues) when you find one.
-
-**Platforms**
-
-- ✅ **Windows** · x86_64 (ARM builds are paused, see [#326](https://github.com/jub0t/Concat/issues/326)). A setup and an `.msi`. If SmartScreen stops an unsigned build: **More info** › **Run anyway**
-- ✅ **macOS** · Intel and Apple silicon. If macOS refuses to open an unsigned build: `xattr -dr com.apple.quarantine /Applications/Concat.app`
-- ✅ **Linux** · x86_64 and ARM. `.deb`, `.rpm`, `.AppImage` and an Arch package. Also a Flatpak on **[Flatpark](https://flatpark.org/apps/app.concat.editor/)**, a community Flatpak remote that wraps the x86_64 `.deb` of each release and updates with it
-- ✅ **Android** · phones and tablets
-- ✅ **iOS / iPadOS** · iPhone and iPad, sideloaded
-
-✅ Supported · 🚧 Work in progress · 🧪 To be tested
-
-**System requirements** and the optional model sizes are on [the website](https://concat.standalones.org/guides/system-requirements).
-
-**[Code signing policy](CODE_SIGNING.md)**: why the Windows builds are not signed yet, and what Concat sends over the network (nothing you did not ask for).
+**Needs:** Codex installed and signed in (`npm i -g @openai/codex`, or the Codex app). Without it the pane says so and offers to check again.
 
 ## Build from source
 
 You need Rust 1.93 or newer (see `rust-version` in `src/Cargo.toml`), the FFmpeg 7+ development libraries, cmake and a C++ compiler.
 
 - **macOS:** `brew install ffmpeg`
-- **Windows:** from [FFmpeg's Windows downloads](https://ffmpeg.org/download.html#build-windows), take BtbN's `win64-gpl-shared` build (the one CI uses), unpack it and point `FFMPEG_DIR` at it
-- **Linux:** use your distro's FFmpeg if it is version 7 or newer, otherwise use a BtbN `shared` build with `FFMPEG_DIR` like on Windows
-
-Then:
+- **Windows:** from [FFmpeg's Windows downloads](https://ffmpeg.org/download.html#build-windows), take BtbN's `win64-gpl-shared` build, unpack it and point `FFMPEG_DIR` at it
+- **Linux:** use your distro's FFmpeg if it is version 7 or newer, otherwise a BtbN `shared` build with `FFMPEG_DIR` like on Windows
 
 ```sh
 cd src
-cargo run -p concat          # the editor window
+cargo run --profile quick -p concat    # the editor window
+cargo test                             # the test suite
 ```
 
-Other useful commands:
+If you change text the interface shows, keep every file in `src/crates/concat/locales/` in step: a test fails when a language lacks a key. More in [CONTRIBUTING.md](CONTRIBUTING.md).
 
-```sh
-cargo build --profile app -p concat   # the shipping binary (fat LTO, stripped)
-cargo test                            # run the test suite
-cargo fmt --check && cargo clippy --all-targets -- -D warnings   # what CI checks
-```
+## Where it comes from
 
-If you change text the interface shows, run `python3 scripts/locales.py` from the repo root so the string inventory stays in sync. Full details live in [CONTRIBUTING.md](CONTRIBUTING.md).
+ElonCut is a fork of **[Concat](https://github.com/jub0t/Concat)** by Jareer Abdullah and its contributors. The editor, the engine and the MCP server are theirs; ElonCut adds the Agent pane (`src/crates/concat-agent`, `src/crates/concat/src/agent.rs`, `live.rs`), the live bridge in the API (`concat_api::Live`) and the new name.
 
-## How to Contribute
-
-> [!IMPORTANT]
-> The best way to contribute is to grab a build from the [Releases](https://github.com/jub0t/Concat/releases) page and use it: find where it breaks, and say where it could be better.
->
-> Ready to write code? [CONTRIBUTING.md](./CONTRIBUTING.md) covers setup, the layout of the tree, the checks to run, and how contributions are licensed. Driving Concat from a script, a service or an agent? [The developer docs](https://concat.standalones.org/docs) cover the Concat API and its transports: JSON-RPC and gRPC; [docs/MCP.md](docs/MCP.md) connects an AI agent over MCP. [This Discussion](https://github.com/jub0t/Concat/discussions/3) is where the project was announced.
-> 
-> Contributors can claim a `@Contributor` role in the Discord server: just ask.
-
-## Star History
-
-<a href="https://www.star-history.com/?repos=jub0t%2Fconcat&type=date&releases=&legend=bottom-right">
- <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=jub0t/concat&type=date&legend=bottom-right" />
-</a>
-
-## Contributors
-
-<a href="https://github.com/jub0t/Concat/graphs/contributors">
-  <img alt="Contributors" src="https://contrib.rocks/image?repo=jub0t/concat">
-</a>
+Inside the code the name is left as it was: the crates are `concat-*`, the program is `concat`, and the project format (`concat.json`) is unchanged, so projects open in both. The upstream remote is kept as `upstream` for merging its fixes. The Concat name and marks belong to its authors ([TRADEMARK.md](TRADEMARK.md)); the original README is kept as [docs/README.upstream.md](docs/README.upstream.md), and its translations in `docs/` describe Concat.
 
 ## Licence
 
-Concat is free software under [AGPL-3.0-or-later](LICENSE). A commercial licence is available for closed-source use; see [LICENSING.md](LICENSING.md).
+ElonCut is free software under [AGPL-3.0-or-later](LICENSE), as Concat is. If you run a modified version for others over a network, you must offer them its source. See [LICENSING.md](LICENSING.md) and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
-## DMCA
+---
 
-If you believe something in this repository, its releases, or a package or model it distributes infringes your copyright, email [jub0trd@gmail.com](mailto:jub0trd@gmail.com) with a description of the work you own, a link to where the infringing material appears here, your contact details, a statement that you believe in good faith the use is not authorised by you, your agent, or the law, and a statement, under penalty of perjury, that the notice is accurate and that you are the owner or authorised to act for the owner, signed with your physical or electronic signature; valid notices are acted on promptly, and anyone whose material is removed may send a counter-notice to the same address.
+<a id="简体中文"></a>
+
+## 简体中文
+
+**ElonCut** 是一款免费开源、完全本地运行的视频编辑器(macOS、Windows、Linux),自带 **Agent 面板**:在时间线旁边直接对话,描述想要的剪辑,附上素材或参考图,智能体就在你打开的工程上动手剪,你能看着它剪。
+
+**智能体用的是你电脑上已安装的 [Codex](https://developers.openai.com/codex/cli)**,模型、推理深度和登录都沿用 `~/.codex/config.toml`,不需要再填密钥。
+
+- **能动手的对话**:通过内置 [MCP 服务](docs/MCP.md)剪切、裁剪、移动、加标题和字幕、特效、关键帧、导出,还会取帧检查自己的成果。
+- **实时模式(Live)**:开启后智能体直接编辑当前打开的工程,每一步都立刻显示,计入窗口的撤销历史;关闭后它不会碰你打开的工程。
+- **照片、视频、文件**:点回形针添加,或在消息框里点一下后把文件拖进窗口。照片会直接给模型看,视频和其他文件以路径交给它,由它用工具导入。
+- **模型与推理深度**:在消息框旁选择,默认就是你自己 Codex 配置里的那个。
+- **对话管理**:点时钟按钮新建、搜索、重命名、删除、恢复对话,恢复后保留完整历史。
+- **可自由执行**:智能体不会弹审批,命令也没有沙盒,它能在这台电脑上做你能做的事。不放心就关掉 Live 并留意它的操作。
+
+在任意面板右上角的下拉菜单里添加「智能体」面板。**前提**:已安装并登录 Codex(`npm i -g @openai/codex` 或 Codex 应用)。
+
+**来源**:ElonCut 是 **[Concat](https://github.com/jub0t/Concat)**(作者 Jareer Abdullah 及贡献者)的分支,编辑器、引擎和 MCP 服务出自上游,遵循 AGPL-3.0-or-later。ElonCut 增加了 Agent 面板、实时桥接和新名称;代码内部的 crate 名、`concat` 程序名和 `concat.json` 工程格式保持不变,工程两边通用。上游仓库保留为 `upstream` 远程。
