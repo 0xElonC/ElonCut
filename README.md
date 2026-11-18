@@ -18,6 +18,7 @@ The agent is the **[Codex](https://developers.openai.com/codex/cli) already inst
 - **Chat that edits.** The agent edits through the built-in [MCP server](docs/MCP.md): cut, trim, move, titles, captions, effects, keyframes, export, and a look at any frame to check its work.
 - **Live mode.** With **Live** on, the agent edits the project open in the window. Each edit is drawn at once, joins the window's history and is undone with the same Undo. With it off, the agent never touches the open project.
 - **Photos, videos and files.** Attach with the paperclip, or drag files onto the window after clicking in the message box. Photos are shown to the model; videos and other files are handed over as paths, to be imported with the tools.
+- **Skills.** The wand button beside the paperclip lists the skills your Codex has, with a search. Pick one or more and they go with the message as pills above the message box.
 - **Model and depth.** Pick the model and the reasoning depth beside the message box. The first choice is whatever your own Codex settings use.
 - **Conversations.** Start, search, rename, delete and resume conversations from the clock button. A conversation comes back with its whole history.
 - **Free to act.** The agent runs without approval prompts and its commands are not sandboxed: it can do on this computer what you can. Turn Live off and read what it does if that is not what you want.
@@ -83,6 +84,7 @@ ElonCut is free software under [AGPL-3.0-or-later](LICENSE), as Concat is. If yo
 - **能动手的对话**:通过内置 [MCP 服务](docs/MCP.md)剪切、裁剪、移动、加标题和字幕、特效、关键帧、导出,还会取帧检查自己的成果。
 - **实时模式(Live)**:开启后智能体直接编辑当前打开的工程,每一步都立刻显示,计入窗口的撤销历史;关闭后它不会碰你打开的工程。
 - **照片、视频、文件**:点回形针添加,或在消息框里点一下后把文件拖进窗口。照片会直接给模型看,视频和其他文件以路径交给它,由它用工具导入。
+- **技能(Skill)**:回形针旁的魔法棒按钮会列出你 Codex 里的技能,可搜索;选中的技能以标签形式随消息一起发送。
 - **模型与推理深度**:在消息框旁选择,默认就是你自己 Codex 配置里的那个。
 - **对话管理**:点时钟按钮新建、搜索、重命名、删除、恢复对话,恢复后保留完整历史。
 - **可自由执行**:智能体不会弹审批,命令也没有沙盒,它能在这台电脑上做你能做的事。不放心就关掉 Live 并留意它的操作。
