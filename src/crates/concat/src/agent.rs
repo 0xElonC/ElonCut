@@ -27,15 +27,17 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use concat_agent::rpc::{Codex, Incoming};
 use concat_agent::store::{Chat, Store};
-use concat_agent::wire::{self, Input, Item, McpServer, Model, ThreadSetup, ToolState, Update};
+use concat_agent::wire::{
+    self, Input, Item, McpServer, Model, Skill, ThreadSetup, ToolState, Update,
+};
 use serde_json::{Value, json};
 use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
 
 use crate::host::Shell;
 use crate::i18n::{t, tf};
 use crate::ui::{
-    AgentAttachment, AgentChat, AgentMessage, AgentRole, AgentSession, AgentStatus, AgentToolCall,
-    App,
+    AgentAttachment, AgentChat, AgentMessage, AgentRole, AgentSession, AgentSkill, AgentStatus,
+    AgentToolCall, App,
 };
 
 /// A file waiting to go with the next message.
@@ -118,6 +120,11 @@ struct Controller {
     minted: u64,
     /// What the pane last said the project was called.
     shown_project: String,
+    /// The skills Codex has, as last asked, and the search over them.
+    skills: Vec<Skill>,
+    skill_query: String,
+    /// The skills chosen for the next message.
+    picked: Vec<Skill>,
     /// The person is at the composer: a file dropped on the window is
     /// meant for the agent. Ended by a press anywhere else in the editor.
     engaged: bool,
@@ -465,6 +472,28 @@ impl Controller {
                 .collect::<Vec<_>>(),
         )));
 
+        let query = self.skill_query.trim().to_lowercase();
+        chat.set_skills(ModelRc::new(VecModel::from(
+            self.skills
+                .iter()
+                .filter(|skill| {
+                    !self.picked.iter().any(|picked| picked.name == skill.name)
+                        && (query.is_empty()
+                            || skill.name.to_lowercase().contains(&query)
+                            || skill.description.to_lowercase().contains(&query))
+                })
+                .map(|skill| AgentSkill {
+                    name: skill.name.as_str().into(),
+                    description: skill.description.as_str().into(),
+                })
+                .collect::<Vec<_>>(),
+        )));
+        chat.set_picked_skills(ModelRc::new(VecModel::from(
+            self.picked
+                .iter()
+                .map(|skill| SharedString::from(skill.name.as_str()))
+                .collect::<Vec<_>>(),
+        )));
         let title = self
             .current
             .as_deref()
@@ -544,6 +573,7 @@ impl Controller {
                 c.choose_defaults();
                 c.codex = Some(codex);
                 c.link = Link::Ready;
+                c.load_skills(shell);
                 c.publish(shell, app);
             });
         });
@@ -788,6 +818,29 @@ impl Controller {
         ))
     }
 
+    /// Asks Codex which skills there are for the project the window has.
+    fn load_skills(&mut self, shell: &Shell) {
+        let Some(codex) = self.codex.clone() else {
+            return;
+        };
+        let cwd = shell
+            .studio
+            .borrow()
+            .session
+            .as_ref()
+            .map(|session| session.path().to_owned())
+            .or_else(|| std::env::var("HOME").ok())
+            .unwrap_or_else(|| ".".into());
+        codex.call("skills/list", wire::skills_params(&cwd), |reply| {
+            post(move |c, shell, app| {
+                if let Ok(result) = reply {
+                    c.skills = wire::read_skills(&result);
+                    c.publish(shell, app);
+                }
+            });
+        });
+    }
+
     fn add_files(&mut self, paths: Vec<PathBuf>) {
         for path in paths.into_iter().filter(|path| path.is_file()) {
             let id = self.mint("a");
@@ -811,7 +864,7 @@ impl Controller {
         }
         let files = std::mem::take(&mut self.attachments);
         let text = text.trim().to_owned();
-        if text.is_empty() && files.is_empty() {
+        if text.is_empty() && files.is_empty() && self.picked.is_empty() {
             return;
         }
         // What goes to the model: the words, the pictures as pictures, and
@@ -830,11 +883,26 @@ impl Controller {
             }
         }
         inputs.insert(0, Input::Text(words));
+        let skills = std::mem::take(&mut self.picked);
+        for skill in &skills {
+            inputs.push(Input::Skill {
+                name: skill.name.clone(),
+                path: skill.path.clone(),
+            });
+        }
 
         let id = self.mint("u");
         let mut said = Line::new(&id, AgentRole::User);
         said.text = text.clone();
-        said.images = files.iter().map(|file| file.shown.clone()).collect();
+        said.images = skills
+            .iter()
+            .map(|skill| AgentAttachment {
+                name: skill.name.as_str().into(),
+                kind: "skill".into(),
+                ..AgentAttachment::default()
+            })
+            .chain(files.iter().map(|file| file.shown.clone()))
+            .collect();
         self.lines.push(said);
         self.busy = true;
 
@@ -957,6 +1025,7 @@ impl Controller {
         self.current = None;
         self.lines.clear();
         self.attachments.clear();
+        self.picked.clear();
         self.turn = None;
         self.busy = false;
     }
@@ -1046,6 +1115,9 @@ pub fn install(app: &App) {
         minted: 0,
         shown_project: String::new(),
         engaged: false,
+        skills: Vec::new(),
+        skill_query: String::new(),
+        picked: Vec::new(),
     };
     CONTROLLER.with(|slot| *slot.borrow_mut() = Some(controller));
 
@@ -1106,6 +1178,34 @@ pub fn install(app: &App) {
         let picked = crate::platform::pick_files("Attach", None).unwrap_or_default();
         with(move |c, shell, app| {
             c.add_files(picked);
+            c.publish(shell, app);
+        });
+    });
+    chat.on_skills_open(|| {
+        with(|c, shell, _| {
+            c.skill_query.clear();
+            c.load_skills(shell);
+        });
+    });
+    chat.on_skills_search(|text| {
+        with(|c, shell, app| {
+            c.skill_query = text.to_string();
+            c.publish(shell, app);
+        });
+    });
+    chat.on_skill_add(|name| {
+        with(|c, shell, app| {
+            if let Some(skill) = c.skills.iter().find(|skill| skill.name == name.as_str()).cloned()
+                && !c.picked.iter().any(|picked| picked.name == skill.name)
+            {
+                c.picked.push(skill);
+            }
+            c.publish(shell, app);
+        });
+    });
+    chat.on_skill_remove(|name| {
+        with(|c, shell, app| {
+            c.picked.retain(|skill| skill.name != name.as_str());
             c.publish(shell, app);
         });
     });

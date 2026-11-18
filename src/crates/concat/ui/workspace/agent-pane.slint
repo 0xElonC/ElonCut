@@ -96,6 +96,12 @@ export struct AgentMessage {
     streaming: bool,
 }
 
+/// A skill the agent can be pointed at.
+export struct AgentSkill {
+    name: string,
+    description: string,
+}
+
 /// One conversation in the list.
 export struct AgentSession {
     id: string,
@@ -143,6 +149,15 @@ export global AgentChat {
     callback send(text: string);
     callback stop();
     callback attach-pick();
+    /// The skills Codex has, for the composer's picker; asked again each
+    /// time the picker opens, since a skill may have been added.
+    in property <[AgentSkill]> skills;
+    /// The skills chosen for the next message, by name.
+    in property <[string]> picked-skills;
+    callback skills-open();
+    callback skills-search(text: string);
+    callback skill-add(name: string);
+    callback skill-remove(name: string);
     /// The composer took the keyboard: files dropped on the window now go
     /// to the agent, not the library, until something else is pressed.
     callback composer-focused();
@@ -165,6 +180,7 @@ global Kinds {
         return kind == "video" ? Theme.kind-video
             : kind == "audio" ? Theme.kind-audio
             : kind == "image" ? Theme.kind-image
+            : kind == "skill" ? Theme.accent
             : Theme.fg-muted;
     }
 
@@ -172,6 +188,7 @@ global Kinds {
         return kind == "video" ? Glyph.film
             : kind == "audio" ? Glyph.music
             : kind == "image" ? Glyph.image
+            : kind == "skill" ? Glyph.wand
             : Glyph.folder;
     }
 }
@@ -239,6 +256,152 @@ component AttachmentChip inherits Rectangle {
                 width: 20px;
                 height: 20px;
                 clicked => { root.removed(); }
+            }
+        }
+    }
+}
+
+// A skill chosen for the next message: a pill with its name and a cross.
+component SkillChip inherits Rectangle {
+    in property <string> name;
+    callback removed();
+
+    height: 26px;
+    border-radius: 13px;
+    background: Theme.accent-soft;
+    border-width: 1px;
+    border-color: Theme.accent;
+    min-width: row.preferred-width;
+
+    row := HorizontalLayout {
+        padding-left: 9px;
+        padding-right: 4px;
+        spacing: 5px;
+        VerticalLayout {
+            alignment: center;
+            Icon {
+                glyph: Glyph.wand;
+                size: 11px;
+                tint: Theme.accent;
+            }
+        }
+        Text {
+            text: root.name;
+            color: Theme.accent;
+            font-size: Theme.fs-sm;
+            font-weight: Theme.weight-title;
+            vertical-alignment: center;
+        }
+        VerticalLayout {
+            alignment: center;
+            IconButton {
+                glyph: Glyph.close;
+                label: I18n.t("agent.removeAttachment");
+                icon-size: 9px;
+                width: 18px;
+                height: 18px;
+                clicked => { root.removed(); }
+            }
+        }
+    }
+}
+
+// The list of skills, with a search over it, opened from the composer.
+component SkillPicker inherits Rectangle {
+    callback chosen(name: string);
+
+    property <string> query;
+
+    background: Theme.raised;
+    border-radius: Theme.r-lg;
+    border-width: 1px;
+    border-color: Theme.line-strong;
+    clip: true;
+
+    VerticalLayout {
+        padding: 8px;
+        spacing: 6px;
+
+        Rectangle {
+            height: 30px;
+            background: Theme.field;
+            border-radius: Theme.r;
+            HorizontalLayout {
+                padding-left: 8px;
+                padding-right: 8px;
+                spacing: 6px;
+                VerticalLayout {
+                    alignment: center;
+                    Icon {
+                        glyph: Glyph.search;
+                        size: 12px;
+                        tint: Theme.fg-dim;
+                    }
+                }
+                search := TextInput {
+                    horizontal-stretch: 1;
+                    vertical-alignment: center;
+                    color: Theme.fg;
+                    font-size: Theme.fs;
+                    single-line: true;
+                    selection-background-color: Theme.accent;
+                    selection-foreground-color: Theme.on-accent;
+                    edited => {
+                        root.query = self.text;
+                        AgentChat.skills-search(self.text);
+                    }
+                    Text {
+                        visible: root.query == "";
+                        text: I18n.t("agent.searchSkills");
+                        color: Theme.fg-dim;
+                        font-size: Theme.fs;
+                        vertical-alignment: center;
+                    }
+                }
+            }
+        }
+
+        if AgentChat.skills.length == 0: Text {
+            vertical-stretch: 1;
+            text: I18n.t("agent.noSkills");
+            color: Theme.fg-dim;
+            font-size: Theme.fs;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+        if AgentChat.skills.length > 0: Flickable {
+            vertical-stretch: 1;
+            content-height: list.preferred-height;
+            list := VerticalLayout {
+                spacing: 2px;
+                for skill in AgentChat.skills: Rectangle {
+                    height: 48px;
+                    border-radius: Theme.r;
+                    background: row-touch.has-hover ? Theme.field-hover : Colors.transparent;
+                    VerticalLayout {
+                        padding-left: 10px;
+                        padding-right: 10px;
+                        alignment: center;
+                        spacing: 2px;
+                        Text {
+                            text: skill.name;
+                            color: Theme.fg;
+                            font-size: Theme.fs-lg;
+                            font-weight: Theme.weight-title;
+                            overflow: elide;
+                        }
+                        Text {
+                            text: skill.description;
+                            color: Theme.fg-dim;
+                            font-size: Theme.fs-sm;
+                            overflow: elide;
+                        }
+                    }
+                    row-touch := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => { root.chosen(skill.name); }
+                    }
+                }
             }
         }
     }
@@ -1154,6 +1317,17 @@ component Composer inherits Rectangle {
             padding: 8px;
             spacing: 6px;
 
+            if AgentChat.picked-skills.length > 0: Flickable {
+                height: 26px;
+                content-width: picked.preferred-width;
+                picked := HorizontalLayout {
+                    spacing: 6px;
+                    for name in AgentChat.picked-skills: SkillChip {
+                        name: name;
+                        removed => { AgentChat.skill-remove(name); }
+                    }
+                }
+            }
             if AgentChat.attachments.length > 0: Flickable {
                 height: 40px;
                 content-width: chips.preferred-width;
@@ -1223,6 +1397,36 @@ component Composer inherits Rectangle {
                     label: I18n.t("agent.attach");
                     enabled: root.enabled;
                     clicked => { AgentChat.attach-pick(); }
+                }
+                skill-anchor := Rectangle {
+                    width: 28px;
+                    height: 28px;
+                    IconButton {
+                        width: 28px;
+                        height: 28px;
+                        glyph: Glyph.wand;
+                        label: I18n.t("agent.skills");
+                        checked: AgentChat.picked-skills.length > 0;
+                        enabled: root.enabled;
+                        clicked => {
+                            AgentChat.skills-open();
+                            skill-popup.show();
+                        }
+                    }
+                    skill-popup := PopupWindow {
+                        x: 0px;
+                        y: -(self.height) - 8px;
+                        width: Math.min(340px, root.width - 24px);
+                        height: 320px;
+                        SkillPicker {
+                            width: parent.width;
+                            height: parent.height;
+                            chosen(name) => {
+                                AgentChat.skill-add(name);
+                                skill-popup.close();
+                            }
+                        }
+                    }
                 }
                 Select {
                     flat: true;

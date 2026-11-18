@@ -85,6 +85,8 @@ pub enum Input {
     Text(String),
     /// A picture the model looks at.
     Image(PathBuf),
+    /// A skill the person chose to bring into the message.
+    Skill { name: String, path: String },
 }
 
 /// `turn/start`: one message, and how hard to think about it.
@@ -101,6 +103,7 @@ pub fn turn_params(
             Input::Image(path) => {
                 json!({ "type": "localImage", "path": path.to_string_lossy() })
             }
+            Input::Skill { name, path } => json!({ "type": "skill", "name": name, "path": path }),
         })
         .collect();
     let mut object = Map::new();
@@ -113,6 +116,48 @@ pub fn turn_params(
         object.insert("effort".into(), json!(effort));
     }
     Value::Object(object)
+}
+
+/// A skill the agent can be pointed at.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Skill {
+    pub name: String,
+    pub description: String,
+    /// The `SKILL.md` Codex reads it from.
+    pub path: String,
+}
+
+/// `skills/list`, for what is available in `cwd`.
+pub fn skills_params(cwd: &str) -> Value {
+    json!({ "cwds": [cwd], "forceReload": false })
+}
+
+/// Reads `skills/list`: the skills that are turned on, by name, each once.
+pub fn read_skills(result: &Value) -> Vec<Skill> {
+    let mut skills: Vec<Skill> = result
+        .get("data")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .flat_map(|entry| entry.get("skills").and_then(Value::as_array).into_iter().flatten())
+        .filter(|skill| skill.get("enabled").and_then(Value::as_bool).unwrap_or(true))
+        .filter_map(|skill| {
+            Some(Skill {
+                name: skill.get("name")?.as_str()?.to_owned(),
+                description: skill
+                    .get("shortDescription")
+                    .and_then(Value::as_str)
+                    .filter(|text| !text.is_empty())
+                    .or_else(|| skill.get("description").and_then(Value::as_str))
+                    .unwrap_or("")
+                    .to_owned(),
+                path: skill.get("path")?.as_str()?.to_owned(),
+            })
+        })
+        .collect();
+    skills.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    skills.dedup_by(|a, b| a.name == b.name);
+    skills
 }
 
 /// `turn/interrupt`.
@@ -660,6 +705,33 @@ mod tests {
             read_update("error", &json!({ "error": { "message": "x" } })),
             Some(Update::Trouble { thread: None, .. })
         ));
+    }
+
+    #[test]
+    fn skills_are_listed_by_name_once_and_only_when_on() {
+        let result = json!({ "data": [
+            { "cwd": "/a", "skills": [
+                { "name": "zoom", "description": "long", "shortDescription": "short",
+                  "path": "/s/zoom/SKILL.md", "enabled": true },
+                { "name": "Audit", "description": "check", "path": "/s/audit/SKILL.md", "enabled": true },
+                { "name": "off", "description": "x", "path": "/s/off/SKILL.md", "enabled": false } ] },
+            { "cwd": "/b", "skills": [
+                { "name": "zoom", "description": "again", "path": "/t/zoom/SKILL.md", "enabled": true } ] },
+        ]});
+        let skills = read_skills(&result);
+        let names: Vec<&str> = skills.iter().map(|skill| skill.name.as_str()).collect();
+        assert_eq!(names, ["Audit", "zoom"]);
+        assert_eq!(skills[1].description, "short");
+        let params = turn_params(
+            "t",
+            &[Input::Skill { name: "zoom".into(), path: "/s/zoom/SKILL.md".into() }],
+            None,
+            None,
+        );
+        assert_eq!(
+            params["input"][0],
+            json!({ "type": "skill", "name": "zoom", "path": "/s/zoom/SKILL.md" })
+        );
     }
 
     #[test]
