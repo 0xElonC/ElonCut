@@ -34,7 +34,8 @@ use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
 use crate::host::Shell;
 use crate::i18n::{t, tf};
 use crate::ui::{
-    AgentAttachment, AgentChat, AgentMessage, AgentRole, AgentSession, AgentStatus, App,
+    AgentAttachment, AgentChat, AgentMessage, AgentRole, AgentSession, AgentStatus, AgentToolCall,
+    App,
 };
 
 /// A file waiting to go with the next message.
@@ -181,6 +182,41 @@ fn instructions(project: Option<&str>, live: bool) -> String {
     text
 }
 
+/// The first `longest` characters of `text`, marked when there were more:
+/// a tool's whole answer can be a screenful of JSON.
+fn clip(text: &str, longest: usize) -> String {
+    if text.chars().count() <= longest {
+        return text.to_owned();
+    }
+    let head: String = text.chars().take(longest).collect();
+    format!("{head}…")
+}
+
+/// Words as the chat draws them: the model writes Markdown, and the pane
+/// draws plain text, so the marks that would show as stray characters
+/// are taken off - emphasis and heading marks - and bullets are bulleted.
+fn plain(text: &str) -> String {
+    text.lines()
+        .map(|line| {
+            let trimmed = line.trim_start();
+            let body = trimmed.trim_start_matches('#');
+            let body = if body.len() != trimmed.len() {
+                body.trim_start()
+            } else {
+                trimmed
+            };
+            let indent = &line[..line.len() - trimmed.len()];
+            let body = body
+                .strip_prefix("- ")
+                .or_else(|| body.strip_prefix("* "))
+                .map(|rest| format!("• {rest}"))
+                .unwrap_or_else(|| body.to_owned());
+            format!("{indent}{}", body.replace("**", "").replace("__", ""))
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 fn effort_label(effort: &str) -> String {
     match effort {
         "low" => t("agent.effortLow"),
@@ -305,6 +341,26 @@ impl Controller {
 
     // ── what the pane shows ──
 
+    /// What the agent is doing, in words, while a turn runs.
+    fn activity(&self) -> String {
+        if !self.busy {
+            return String::new();
+        }
+        match self.lines.last() {
+            Some(line) if matches!(line.role, AgentRole::Tool) && line.tool_state == 0 => {
+                tf("agent.runningTool", &[&line.tool])
+            }
+            Some(line)
+                if matches!(line.role, AgentRole::Assistant)
+                    && line.streaming
+                    && !line.text.is_empty() =>
+            {
+                t("agent.writing")
+            }
+            _ => t("agent.thinking"),
+        }
+    }
+
     fn publish(&mut self, shell: &Shell, app: &App) {
         let chat = app.global::<AgentChat>();
         match &self.link {
@@ -326,6 +382,7 @@ impl Controller {
             }
         }
         chat.set_busy(self.busy);
+        chat.set_activity(self.activity().into());
         chat.set_live(self.live.load(Ordering::Relaxed));
         chat.set_models(ModelRc::new(VecModel::from(
             self.models
@@ -342,22 +399,64 @@ impl Controller {
         )));
         chat.set_effort_index(self.effort as i32);
 
-        let messages: Vec<AgentMessage> = self
-            .lines
-            .iter()
-            .map(|line| AgentMessage {
-                id: line.id.as_str().into(),
-                role: line.role,
-                text: line.text.as_str().into(),
-                attachments: ModelRc::new(VecModel::from(line.images.clone())),
-                reasoning: line.reasoning.as_str().into(),
-                tool: line.tool.as_str().into(),
-                tool_input: line.tool_input.as_str().into(),
-                tool_output: line.tool_output.as_str().into(),
-                tool_state: line.tool_state,
-                streaming: line.streaming,
-            })
-            .collect();
+        let message = |line: &Line| AgentMessage {
+            id: line.id.as_str().into(),
+            role: line.role,
+            text: if matches!(line.role, AgentRole::Assistant) {
+                plain(&line.text).into()
+            } else {
+                line.text.as_str().into()
+            },
+            attachments: ModelRc::new(VecModel::from(line.images.clone())),
+            reasoning: plain(&line.reasoning).into(),
+            tool: line.tool.as_str().into(),
+            tool_input: SharedString::new(),
+            tool_output: SharedString::new(),
+            tool_state: line.tool_state,
+            calls: ModelRc::default(),
+            streaming: line.streaming,
+        };
+        // A run of tool calls made one after another is one line, which
+        // opens to them: an agent that looks at twenty frames would
+        // otherwise fill the conversation with twenty cards.
+        let mut messages: Vec<AgentMessage> = Vec::new();
+        let mut run: Vec<&Line> = Vec::new();
+        let close = |run: &mut Vec<&Line>, messages: &mut Vec<AgentMessage>| {
+            let Some(last) = run.last() else { return };
+            let mut group = message(run[0]);
+            group.tool = last.tool.as_str().into();
+            group.text = last.text.as_str().into();
+            group.tool_state = if run.iter().any(|line| line.tool_state == 0) {
+                0
+            } else if run.iter().any(|line| line.tool_state == 2) {
+                2
+            } else {
+                1
+            };
+            group.calls = ModelRc::new(VecModel::from(
+                run.iter()
+                    .map(|line| AgentToolCall {
+                        id: line.id.as_str().into(),
+                        name: line.tool.as_str().into(),
+                        summary: line.text.as_str().into(),
+                        input: line.tool_input.as_str().into(),
+                        output: line.tool_output.as_str().into(),
+                        state: line.tool_state,
+                    })
+                    .collect::<Vec<_>>(),
+            ));
+            messages.push(group);
+            run.clear();
+        };
+        for line in &self.lines {
+            if matches!(line.role, AgentRole::Tool) {
+                run.push(line);
+            } else {
+                close(&mut run, &mut messages);
+                messages.push(message(line));
+            }
+        }
+        close(&mut run, &mut messages);
         chat.set_messages(ModelRc::new(VecModel::from(messages)));
         chat.set_attachments(ModelRc::new(VecModel::from(
             self.attachments
@@ -515,8 +614,8 @@ impl Controller {
                 line.role = AgentRole::Tool;
                 line.tool = name.clone();
                 line.text = summary.clone();
-                line.tool_input = input.clone();
-                line.tool_output = output.clone();
+                line.tool_input = clip(input, 2000);
+                line.tool_output = clip(output, 2000);
                 line.tool_state = match state {
                     ToolState::Running => 0,
                     ToolState::Done => 1,
@@ -1113,4 +1212,22 @@ pub fn attach(shell: &Shell, app: &App, paths: Vec<PathBuf>) {
             controller.publish(shell, app);
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn markdown_marks_do_not_show_as_stray_characters() {
+        assert_eq!(plain("已经剪成 **5.5 秒** 的片子"), "已经剪成 5.5 秒 的片子");
+        assert_eq!(plain("## 步骤\n- 一\n* 二"), "步骤\n• 一\n• 二");
+        assert_eq!(plain("plain"), "plain");
+    }
+
+    #[test]
+    fn a_long_answer_is_cut_and_marked() {
+        assert_eq!(clip("abc", 5), "abc");
+        assert_eq!(clip("abcdef", 3), "abc…");
+    }
 }

@@ -62,6 +62,18 @@ export struct AgentAttachment {
     has-thumb: bool,
 }
 
+/// One tool call, inside a run of them.
+export struct AgentToolCall {
+    id: string,
+    name: string,
+    /// One line: what it was given.
+    summary: string,
+    input: string,
+    output: string,
+    /// 0 running, 1 done, 2 failed
+    state: int,
+}
+
 /// One line of a conversation.
 export struct AgentMessage {
     id: string,
@@ -77,6 +89,9 @@ export struct AgentMessage {
     tool-output: string,
     /// 0 running, 1 done, 2 failed
     tool-state: int,
+    /// A tool message is a run of calls made one after another, drawn as
+    /// one line that opens to them.
+    calls: [AgentToolCall],
     /// Words are still arriving.
     streaming: bool,
 }
@@ -107,6 +122,8 @@ export global AgentChat {
     in property <string> project;
     /// A turn is running: the send button is a stop button until it ends.
     in property <bool> busy;
+    /// What the agent is doing while it is: "Thinking", "Running clips_split".
+    in property <string> activity;
     /// The agent edits the project that is open in the window, as you watch,
     /// instead of a copy of its own.
     in-out property <bool> live: true;
@@ -229,207 +246,386 @@ component AttachmentChip inherits Rectangle {
 
 // One tool call: a line that says what the agent did, which opens to what it
 // was given and what came back.
+//
+// Laid out by hand rather than by a layout: a layout asks a wrapping Text
+// for its height before it has been given a width, and gets one line.
+// Here every Text is told its width, so its height is the real one.
 component ToolCard inherits Rectangle {
+    in property <AgentToolCall> call;
+
+    property <bool> open;
+    property <bool> has-detail: root.call.input != "" || root.call.output != "";
+    property <length> inner: Math.max(40px, root.width - 20px);
+    property <length> input-h: root.call.input != "" ? input-text.preferred-height : 0px;
+    property <length> output-h: root.call.output != "" ? output-text.preferred-height : 0px;
+    property <length> total: 30px + (root.open && root.has-detail
+        ? 4px + root.input-h + (root.input-h > 0px && root.output-h > 0px ? 6px : 0px)
+            + root.output-h + 10px
+        : 0px);
+
+    min-height: root.total;
+    preferred-height: root.total;
+    max-height: root.total;
+    background: Theme.well;
+    border-radius: Theme.r;
+    border-width: 1px;
+    border-color: root.call.state == 2 ? Theme.danger : Theme.line;
+    clip: true;
+
+    HorizontalLayout {
+        y: 0;
+        height: 30px;
+        padding-left: 10px;
+        padding-right: 10px;
+        spacing: 8px;
+
+        VerticalLayout {
+            alignment: center;
+            Icon {
+                glyph: Glyph.tool;
+                size: 12px;
+                tint: Theme.fg-muted;
+            }
+        }
+        Text {
+            text: root.call.name;
+            color: Theme.fg;
+            font-size: Theme.fs;
+            font-weight: Theme.weight-title;
+            vertical-alignment: center;
+        }
+        Text {
+            horizontal-stretch: 1;
+            text: root.call.summary;
+            color: Theme.fg-dim;
+            font-size: Theme.fs;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+        VerticalLayout {
+            alignment: center;
+            if root.call.state == 0: Rectangle {
+                width: 8px;
+                height: 8px;
+                border-radius: 4px;
+                background: Theme.accent;
+                opacity: Math.mod(animation-tick() / 1ms, 1400) < 700 ? 1.0 : 0.35;
+            }
+            if root.call.state == 1: Icon {
+                glyph: Glyph.check;
+                size: 12px;
+                tint: Theme.green;
+            }
+            if root.call.state == 2: Icon {
+                glyph: Glyph.alert;
+                size: 12px;
+                tint: Theme.danger;
+            }
+        }
+    }
+
+    TouchArea {
+        y: 0;
+        height: 30px;
+        enabled: root.has-detail;
+        mouse-cursor: root.has-detail ? MouseCursor.pointer : MouseCursor.default;
+        clicked => { root.open = !root.open; }
+    }
+
+    input-text := Text {
+        visible: root.open && root.call.input != "";
+        x: 10px;
+        y: 34px;
+        width: root.inner;
+        text: root.call.input;
+        color: Theme.fg-muted;
+        font-family: Theme.font-technical;
+        font-size: Theme.fs-sm;
+        wrap: word-wrap;
+    }
+    output-text := Text {
+        visible: root.open && root.call.output != "";
+        x: 10px;
+        y: 34px + root.input-h + (root.input-h > 0px ? 6px : 0px);
+        width: root.inner;
+        text: root.call.output;
+        color: root.call.state == 2 ? Theme.danger : Theme.fg-dim;
+        font-family: Theme.font-technical;
+        font-size: Theme.fs-sm;
+        wrap: word-wrap;
+    }
+}
+
+// A run of tool calls, as one line: what was used, and a dot or a mark for
+// how it went. It opens to the calls, each of which opens to its detail. An
+// agent that looks at twenty frames is one line in the conversation, not
+// twenty.
+component ToolGroup inherits Rectangle {
     in property <AgentMessage> data;
 
     property <bool> open;
-    property <bool> has-detail: root.data.tool-input != "" || root.data.tool-output != "";
+    property <int> count: root.data.calls.length;
+    out property <length> total: 30px + (root.open ? 6px + cards.preferred-height : 0px);
 
+    height: root.total;
     background: Theme.well;
     border-radius: Theme.r;
     border-width: 1px;
     border-color: root.data.tool-state == 2 ? Theme.danger : Theme.line;
-    height: col.preferred-height;
     clip: true;
 
-    col := VerticalLayout {
-        Rectangle {
-            height: 30px;
+    HorizontalLayout {
+        y: 0;
+        height: 30px;
+        padding-left: 10px;
+        padding-right: 10px;
+        spacing: 8px;
 
-            HorizontalLayout {
-                padding-left: 10px;
-                padding-right: 10px;
-                spacing: 8px;
-
-                VerticalLayout {
-                    alignment: center;
-                    Icon {
-                        glyph: Glyph.tool;
-                        size: 12px;
-                        tint: Theme.fg-muted;
-                    }
-                }
-                Text {
-                    text: root.data.tool;
-                    color: Theme.fg;
-                    font-size: Theme.fs;
-                    font-weight: Theme.weight-title;
-                    vertical-alignment: center;
-                }
-                Text {
-                    horizontal-stretch: 1;
-                    text: root.data.text;
-                    color: Theme.fg-dim;
-                    font-size: Theme.fs;
-                    vertical-alignment: center;
-                    overflow: elide;
-                }
-                VerticalLayout {
-                    alignment: center;
-                    // running: a dot that breathes; done: a tick; failed: a mark
-                    if root.data.tool-state == 0: Rectangle {
-                        width: 8px;
-                        height: 8px;
-                        border-radius: 4px;
-                        background: Theme.accent;
-                        opacity: Math.mod(animation-tick() / 1ms, 1400) < 700 ? 1.0 : 0.35;
-                    }
-                    if root.data.tool-state == 1: Icon {
-                        glyph: Glyph.check;
-                        size: 12px;
-                        tint: Theme.green;
-                    }
-                    if root.data.tool-state == 2: Icon {
-                        glyph: Glyph.alert;
-                        size: 12px;
-                        tint: Theme.danger;
-                    }
-                }
-            }
-
-            TouchArea {
-                enabled: root.has-detail;
-                mouse-cursor: root.has-detail ? MouseCursor.pointer : MouseCursor.default;
-                clicked => { root.open = !root.open; }
+        VerticalLayout {
+            alignment: center;
+            Icon {
+                glyph: Glyph.tool;
+                size: 12px;
+                tint: Theme.fg-muted;
             }
         }
-
-        if root.open && root.has-detail: VerticalLayout {
-            padding: 10px;
-            padding-top: 2px;
-            spacing: 6px;
-
-            if root.data.tool-input != "": Text {
-                text: root.data.tool-input;
-                color: Theme.fg-muted;
-                font-family: Theme.font-technical;
-                font-size: Theme.fs-sm;
-                wrap: word-wrap;
+        Text {
+            text: root.count > 1 ? I18n.t1("agent.toolsUsed", root.count) : root.data.tool;
+            color: Theme.fg;
+            font-size: Theme.fs;
+            font-weight: Theme.weight-title;
+            vertical-alignment: center;
+        }
+        Text {
+            horizontal-stretch: 1;
+            text: root.count > 1 ? root.data.tool : root.data.text;
+            color: Theme.fg-dim;
+            font-size: Theme.fs;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+        VerticalLayout {
+            alignment: center;
+            if root.data.tool-state == 0: Rectangle {
+                width: 8px;
+                height: 8px;
+                border-radius: 4px;
+                background: Theme.accent;
+                opacity: Math.mod(animation-tick() / 1ms, 1400) < 700 ? 1.0 : 0.35;
             }
-            if root.data.tool-output != "": Text {
-                text: root.data.tool-output;
-                color: root.data.tool-state == 2 ? Theme.danger : Theme.fg-dim;
-                font-family: Theme.font-technical;
-                font-size: Theme.fs-sm;
-                wrap: word-wrap;
+            if root.data.tool-state == 1: Icon {
+                glyph: Glyph.check;
+                size: 12px;
+                tint: Theme.green;
+            }
+            if root.data.tool-state == 2: Icon {
+                glyph: Glyph.alert;
+                size: 12px;
+                tint: Theme.danger;
+            }
+        }
+        VerticalLayout {
+            alignment: center;
+            Icon {
+                glyph: root.open ? Glyph.chevron-up : Glyph.chevron-down;
+                size: 10px;
+                tint: Theme.fg-dim;
             }
         }
     }
+
+    TouchArea {
+        y: 0;
+        height: 30px;
+        mouse-cursor: pointer;
+        clicked => { root.open = !root.open; }
+    }
+
+    cards := VerticalLayout {
+        visible: root.open;
+        x: 8px;
+        y: 36px;
+        width: root.width - 16px;
+        spacing: 6px;
+        for call in root.data.calls: ToolCard { call: call; }
+    }
 }
 
-// One line of the conversation, drawn by who said it.
+// One line of the conversation, drawn by who said it. Laid out by hand, for
+// the reason ToolCard is: every Text is given its width, so a wrapped line
+// is as tall as it really is and the next one starts below it.
 component MessageRow inherits Rectangle {
     in property <AgentMessage> data;
     /// The width the list gives its rows.
     in property <length> room;
 
-    height: col.preferred-height;
+    property <bool> user: root.data.role == AgentRole.user;
+    property <bool> agent: root.data.role == AgentRole.assistant;
+    property <bool> tool: root.data.role == AgentRole.tool;
+    property <bool> notice: root.data.role == AgentRole.notice;
 
-    col := VerticalLayout {
-        // The person: right-aligned, in a bubble, files above their words.
-        if root.data.role == AgentRole.user: VerticalLayout {
-            alignment: start;
-            spacing: 6px;
+    // the person
+    property <length> files-h: root.data.attachments.length > 0 ? 42px : 0px;
+    property <length> bubble-w: Math.min(root.room * 0.88, probe.preferred-width + 24px);
+    property <length> bubble-h: root.data.text != "" ? bubble-text.preferred-height + 16px : 0px;
+    // the agent
+    property <length> lead: 30px;
+    property <length> think-h: root.data.reasoning != ""
+        ? think-text.preferred-height + 6px : 0px;
+    property <length> answer-h: (root.data.text != "" || root.data.streaming)
+        ? answer-text.preferred-height : 0px;
 
-            if root.data.attachments.length > 0: HorizontalLayout {
-                alignment: end;
-                spacing: 6px;
-                for file in root.data.attachments: AttachmentChip {
-                    data: file;
-                }
-            }
-            if root.data.text != "": HorizontalLayout {
-                alignment: end;
-                Rectangle {
-                    background: Theme.field;
-                    border-radius: Theme.r-lg;
-                    max-width: root.room * 0.88;
-                    min-height: bubble-text.preferred-height + 16px;
+    property <length> total: root.user ? root.files-h + root.bubble-h
+        : root.agent ? Math.max(22px, root.think-h + root.answer-h)
+        : root.tool ? group.total
+        : notice-text.preferred-height;
 
-                    bubble-text := Text {
-                        x: 12px;
-                        y: 8px;
-                        width: parent.width - 24px;
-                        text: root.data.text;
-                        color: Theme.fg;
-                        font-size: Theme.fs-lg;
-                        wrap: word-wrap;
-                    }
-                    // Wide enough for its words, but never past the cap.
-                    preferred-width: Math.min(root.room * 0.88, probe.preferred-width + 24px);
-                    probe := Text {
-                        visible: false;
-                        text: root.data.text;
-                        font-size: Theme.fs-lg;
-                        wrap: no-wrap;
-                    }
-                }
-            }
+    min-height: root.total;
+    preferred-height: root.total;
+    max-height: root.total;
+
+    // ── the person ──
+    HorizontalLayout {
+        visible: root.user;
+        y: 0;
+        width: root.room;
+        height: 36px;
+        alignment: end;
+        spacing: 6px;
+        for file in root.data.attachments: AttachmentChip {
+            data: file;
         }
+    }
+    Rectangle {
+        visible: root.user && root.data.text != "";
+        x: root.room - root.bubble-w;
+        y: root.files-h;
+        width: root.bubble-w;
+        height: root.bubble-h;
+        background: Theme.field;
+        border-radius: Theme.r-lg;
+    }
+    bubble-text := Text {
+        visible: root.user;
+        x: root.room - root.bubble-w + 12px;
+        y: root.files-h + 8px;
+        width: root.bubble-w - 24px;
+        text: root.user ? root.data.text : "";
+        color: Theme.fg;
+        font-size: Theme.fs-lg;
+        wrap: word-wrap;
+    }
+    // how wide the words would be on one line
+    probe := Text {
+        visible: false;
+        text: root.user ? root.data.text : "";
+        font-size: Theme.fs-lg;
+        wrap: no-wrap;
+    }
 
-        // The agent: no bubble, a mark in the margin, words running down.
-        if root.data.role == AgentRole.assistant: HorizontalLayout {
-            spacing: 10px;
+    // ── the agent ──
+    Rectangle {
+        visible: root.agent;
+        x: 0;
+        y: 1px;
+        width: 20px;
+        height: 20px;
+        border-radius: 10px;
+        background: Theme.accent-soft;
+        Icon {
+            glyph: Glyph.sparkle;
+            size: 11px;
+            tint: Theme.accent;
+        }
+    }
+    think-text := Text {
+        visible: root.agent && root.data.reasoning != "";
+        x: root.lead;
+        y: 0;
+        width: root.room - root.lead;
+        text: root.agent ? root.data.reasoning : "";
+        color: Theme.fg-dim;
+        font-size: Theme.fs;
+        font-italic: true;
+        wrap: word-wrap;
+    }
+    answer-text := Text {
+        visible: root.agent && root.answer-h > 0px;
+        x: root.lead;
+        y: root.think-h;
+        width: root.room - root.lead;
+        text: root.agent ? root.data.text + (root.data.streaming ? " ▍" : "") : "";
+        color: Theme.fg;
+        font-size: Theme.fs-lg;
+        wrap: word-wrap;
+    }
 
+    // ── what it did ──
+    group := ToolGroup {
+        visible: root.tool;
+        x: root.lead;
+        y: 0;
+        width: root.room - root.lead;
+        data: root.data;
+    }
+
+    // ── the conversation itself ──
+    notice-text := Text {
+        visible: root.notice;
+        x: 0;
+        y: 0;
+        width: root.room;
+        text: root.notice ? root.data.text : "";
+        color: Theme.fg-dim;
+        font-size: Theme.fs-sm;
+        horizontal-alignment: center;
+        wrap: word-wrap;
+    }
+}
+
+// What the agent is doing right now, under the last message: three dots
+// that pulse in turn, the words for it, and how long this has been going on,
+// so that a long thought never looks like a stopped window.
+component Activity inherits Rectangle {
+    property <duration> began: animation-tick();
+    property <int> seconds: Math.max(0, (animation-tick() - root.began) / 1s);
+
+    height: 22px;
+    init => { root.began = animation-tick(); }
+
+    HorizontalLayout {
+        padding-left: 30px;
+        spacing: 8px;
+        alignment: start;
+
+        HorizontalLayout {
+            spacing: 4px;
             VerticalLayout {
-                alignment: start;
-                padding-top: 2px;
-                Rectangle {
-                    width: 20px;
-                    height: 20px;
-                    border-radius: 10px;
-                    background: Theme.accent-soft;
-                    Icon {
-                        glyph: Glyph.sparkle;
-                        size: 11px;
-                        tint: Theme.accent;
+                alignment: center;
+                HorizontalLayout {
+                    spacing: 4px;
+                    for n in 3: Rectangle {
+                        property <float> t: Math.mod(animation-tick() / 1ms + n * 220, 1200) / 1200;
+                        width: 6px;
+                        height: 6px;
+                        border-radius: 3px;
+                        background: Theme.accent;
+                        opacity: t < 0.5 ? 0.25 + 1.5 * t : 0.25 + 1.5 * (1 - t);
                     }
                 }
             }
-            VerticalLayout {
-                horizontal-stretch: 1;
-                spacing: 6px;
-
-                if root.data.reasoning != "": Text {
-                    text: root.data.reasoning;
-                    color: Theme.fg-dim;
-                    font-size: Theme.fs;
-                    font-italic: true;
-                    wrap: word-wrap;
-                }
-                if root.data.text != "" || root.data.streaming: Text {
-                    text: root.data.text + (root.data.streaming ? " ▍" : "");
-                    color: Theme.fg;
-                    font-size: Theme.fs-lg;
-                    wrap: word-wrap;
-                }
-            }
         }
-
-        if root.data.role == AgentRole.tool: HorizontalLayout {
-            padding-left: 30px;
-            ToolCard { data: root.data; }
+        Text {
+            text: AgentChat.activity;
+            color: Theme.fg-muted;
+            font-size: Theme.fs;
+            vertical-alignment: center;
         }
-
-        if root.data.role == AgentRole.notice: HorizontalLayout {
-            alignment: center;
-            Text {
-                text: root.data.text;
-                color: Theme.fg-dim;
-                font-size: Theme.fs-sm;
-                horizontal-alignment: center;
-                wrap: word-wrap;
-            }
+        Text {
+            text: root.seconds >= 3 ? "\{root.seconds}s" : "";
+            color: Theme.fg-dim;
+            font-size: Theme.fs-sm;
+            vertical-alignment: center;
         }
     }
 }
@@ -472,6 +668,7 @@ component MessageList inherits Rectangle {
                 data: message;
                 room: root.width - 32px;
             }
+            if AgentChat.busy: Activity { }
         }
     }
 
