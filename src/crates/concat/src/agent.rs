@@ -150,6 +150,14 @@ fn post(body: impl FnOnce(&mut Controller, &Shell, &App) + Send + 'static) {
     let _ = slint::invoke_from_event_loop(move || with(body));
 }
 
+/// The person's home folder: `HOME`, or `USERPROFILE` on Windows.
+fn home_dir() -> Option<String> {
+    std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .ok()
+        .filter(|home| !home.is_empty())
+}
+
 fn now() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -801,11 +809,10 @@ impl Controller {
             .as_ref()
             .map(|session| session.path().to_owned());
         let live = self.live.load(Ordering::Relaxed);
-        let cwd = project.clone().unwrap_or_else(|| {
-            std::env::var("HOME")
-                .or_else(|_| std::env::var("USERPROFILE"))
-                .unwrap_or_else(|_| ".".into())
-        });
+        let cwd = project
+            .clone()
+            .or_else(home_dir)
+            .unwrap_or_else(|| ".".into());
         let key = format!("{live}:{}", project.clone().unwrap_or_default());
         Ok((
             ThreadSetup {
@@ -829,7 +836,7 @@ impl Controller {
             .session
             .as_ref()
             .map(|session| session.path().to_owned())
-            .or_else(|| std::env::var("HOME").ok())
+            .or_else(home_dir)
             .unwrap_or_else(|| ".".into());
         codex.call("skills/list", wire::skills_params(&cwd), |reply| {
             post(move |c, shell, app| {

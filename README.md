@@ -26,6 +26,24 @@ Add the pane from the dropdown at the corner of any panel, like the Library or t
 
 **Needs:** Codex installed and signed in (`npm i -g @openai/codex`, or the Codex app). Without it the pane says so and offers to check again.
 
+## Quick start
+
+From a fresh checkout, one command installs what is missing, builds and starts ElonCut:
+
+```sh
+./run.sh        # macOS
+```
+
+```bat
+run.cmd         # Windows
+```
+
+It asks before installing anything and changes nothing that is already in place. `--yes` (`-Yes` on Windows) skips the questions, `--setup-only` (`-SetupOnly`) stops after the setup, and `--app` (`-App`) builds the shipping profile. The first build takes a while; later ones take seconds.
+
+- **macOS:** Xcode command-line tools, Homebrew, FFmpeg 7+, cmake, pkgconf, Rust at the pinned version, and Codex through npm.
+- **Windows 10/11:** through `winget`: Visual Studio C++ build tools, Rust, cmake and LLVM. FFmpeg's libraries are downloaded and checked against `scripts/ci/deps.lock` into `src/vendor/ffmpeg/win64`. Codex is installed through npm (and Node.js) if you agree. The Windows script has not been run on a real Windows machine yet; if a step fails, the message says which.
+- **Codex is optional.** Without it the editor works and the Agent pane says Codex is missing. Sign in once with `codex login`.
+
 ## Build from source
 
 You need Rust 1.93 or newer (see `rust-version` in `src/Cargo.toml`), the FFmpeg 7+ development libraries, cmake and a C++ compiler.
@@ -70,5 +88,7 @@ ElonCut is free software under [AGPL-3.0-or-later](LICENSE), as Concat is. If yo
 - **可自由执行**:智能体不会弹审批,命令也没有沙盒,它能在这台电脑上做你能做的事。不放心就关掉 Live 并留意它的操作。
 
 在任意面板右上角的下拉菜单里添加「智能体」面板。**前提**:已安装并登录 Codex(`npm i -g @openai/codex` 或 Codex 应用)。
+
+**一键启动**:拉下仓库后,macOS 运行 `./run.sh`,Windows 运行 `run.cmd`,会检查并安装缺少的依赖(Rust、FFmpeg、cmake、Windows 上还有 C++ 构建工具和 LLVM、可选的 Codex),然后编译并启动。安装前会询问;`--yes`(Windows 为 `-Yes`)跳过询问,`--setup-only`(`-SetupOnly`)只装依赖不启动。Windows 脚本还没有在真实的 Windows 机器上跑过。
 
 **来源**:ElonCut 是 **[Concat](https://github.com/jub0t/Concat)**(作者 Jareer Abdullah 及贡献者)的分支,编辑器、引擎和 MCP 服务出自上游,遵循 AGPL-3.0-or-later。ElonCut 增加了 Agent 面板、实时桥接和新名称;代码内部的 crate 名、`concat` 程序名和 `concat.json` 工程格式保持不变,工程两边通用。上游仓库保留为 `upstream` 远程。
