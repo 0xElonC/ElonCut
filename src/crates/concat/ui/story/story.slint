@@ -1,0 +1,656 @@
+// SPDX-License-Identifier: AGPL-3.0-or-later
+
+// The Story screen: where a short drama is made before it is cut.
+//
+// A third screen beside the launch screen and the editor, for the same
+// project. Five stages along the top - script, cast, storyboard, generate,
+// review - and the storyboard is the one the rest are built round: scenes
+// down the left, a grid of shot cards in the middle, the chosen shot's
+// details on the right. The screen holds no story of its own; Rust fills
+// `StoryState` from the project's story.json and hears about every edit
+// through its callbacks.
+
+import { I18n } from "../i18n.slint";
+import { Theme } from "../theme/theme.slint";
+import { Glyph, Icon } from "../icons.slint";
+import { Button } from "../primitives/modal.slint";
+import { Select } from "../primitives/select.slint";
+import { ThinScrollbar } from "../primitives/scrollbar.slint";
+
+/// A scene in the list.
+export struct StoryScene {
+    id: string,
+    title: string,
+    shots: int,
+    seconds: string,
+}
+
+/// A shot, as the card and the inspector show it.
+export struct StoryShot {
+    id: string,
+    /// "2-3": the scene's number and the shot's in it.
+    number: string,
+    action: string,
+    line: string,
+    who: string,
+    size: int,
+    motion: int,
+    seconds: float,
+    /// 0 nothing yet, 1 waiting, 2 working, 3 made, 4 failed.
+    phase: int,
+    progress: float,
+    has-frame: bool,
+    frame: image,
+    /// Why it failed, or what is missing.
+    note: string,
+}
+
+export global StoryState {
+    in property <string> title;
+    in property <string> summary;
+    in property <[string]> stages;
+    in-out property <int> stage: 2;
+    in property <[StoryScene]> scenes;
+    in-out property <int> scene: 0;
+    in property <[StoryShot]> shots;
+    in-out property <int> shot: -1;
+    in property <StoryShot> current;
+    in property <bool> has-current: false;
+    in property <[string]> sizes;
+    in property <[string]> motions;
+    in property <string> notice;
+
+    callback stage-selected(index: int);
+    callback scene-selected(index: int);
+    callback shot-selected(index: int);
+    callback add-scene();
+    callback add-shot();
+    callback delete-shot();
+    callback action-edited(text: string);
+    callback line-edited(text: string);
+    callback size-changed(index: int);
+    callback motion-changed(index: int);
+    callback seconds-changed(seconds: float);
+    callback generate-frame();
+    callback generate-all();
+    /// The screen came up: read the project's story.
+    callback entered();
+}
+
+// One of the five stages in the strip along the top.
+component StageTab inherits Rectangle {
+    in property <int> number;
+    in property <string> label;
+    in property <bool> current;
+    in property <bool> done;
+
+    callback clicked();
+
+    height: 34px;
+    width: row.preferred-width + 22px;
+    border-radius: 17px;
+    background: root.current ? Theme.panel : (touch.has-hover ? Theme.field : Colors.transparent);
+    border-width: root.current ? 1px : 0px;
+    border-color: Theme.line-strong;
+
+    row := HorizontalLayout {
+        x: 8px;
+        spacing: 8px;
+        alignment: start;
+        VerticalLayout {
+            alignment: center;
+            Rectangle {
+                width: 20px;
+                height: 20px;
+                border-radius: 10px;
+                background: root.current ? Theme.accent : (root.done ? Theme.accent-soft : Theme.field);
+                Text {
+                    text: root.done && !root.current ? "✓" : root.number;
+                    color: root.current ? Theme.on-accent : (root.done ? Theme.accent : Theme.fg-muted);
+                    font-size: Theme.fs-sm;
+                    font-weight: 700;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
+        }
+        VerticalLayout {
+            alignment: center;
+            Text {
+                text: root.label;
+                color: root.current ? Theme.fg : Theme.fg-muted;
+                font-size: Theme.fs-lg;
+            }
+        }
+    }
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+// One state, in a chip.
+component PhaseChip inherits Rectangle {
+    in property <int> phase;
+    in property <float> progress;
+
+    height: 20px;
+    width: label.preferred-width + 16px;
+    border-radius: 10px;
+    background: root.phase == 3 ? #30d15824
+        : root.phase == 4 ? Theme.danger-wash
+        : root.phase == 0 ? Theme.field
+        : Theme.accent-soft;
+
+    label := Text {
+        x: 8px;
+        text: root.phase == 0 ? I18n.t("story.phaseIdle")
+            : root.phase == 1 ? I18n.t("story.phaseQueued")
+            : root.phase == 2 ? I18n.t1("story.phaseRunning", Math.round(root.progress * 100) + "")
+            : root.phase == 3 ? I18n.t("story.phaseDone")
+            : I18n.t("story.phaseFailed");
+        color: root.phase == 3 ? Theme.green
+            : root.phase == 4 ? Theme.danger
+            : root.phase == 0 ? Theme.fg-muted
+            : Theme.accent;
+        font-size: Theme.fs-sm;
+        font-weight: Theme.weight-title;
+        vertical-alignment: center;
+    }
+}
+
+// A 9:16 picture, or what stands where it will be.
+component Frame inherits Rectangle {
+    in property <StoryShot> shot;
+
+    width: self.height * 9 / 16;
+    border-radius: 8px;
+    clip: true;
+    background: Theme.well;
+
+    if root.shot.has-frame: Image {
+        width: 100%;
+        height: 100%;
+        source: root.shot.frame;
+        image-fit: cover;
+    }
+    if !root.shot.has-frame: Rectangle {
+        background: Theme.field;
+        Icon {
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            glyph: Glyph.image;
+            size: 20px;
+            tint: Theme.fg-dim;
+        }
+    }
+    Rectangle {
+        x: 5px;
+        y: parent.height - 22px;
+        width: num.preferred-width + 10px;
+        height: 17px;
+        border-radius: 4px;
+        background: #000000a0;
+        num := Text {
+            x: 5px;
+            text: root.shot.number;
+            color: #ffffff;
+            font-size: Theme.fs-sm;
+            font-weight: 700;
+            vertical-alignment: center;
+        }
+    }
+}
+
+component ShotCard inherits Rectangle {
+    in property <StoryShot> shot;
+    in property <bool> selected;
+    in property <[string]> sizes;
+    in property <[string]> motions;
+
+    callback clicked();
+
+    background: Theme.well;
+    border-radius: 10px;
+    border-width: root.selected ? 2px : 1px;
+    border-color: root.selected ? Theme.accent : Theme.line;
+
+    Frame {
+        x: 8px;
+        y: 8px;
+        height: parent.height - 16px;
+        shot: root.shot;
+    }
+    Rectangle {
+        x: 8px + (parent.height - 16px) * 9 / 16 + 10px;
+        y: 8px;
+        width: parent.width - self.x - 8px;
+        height: parent.height - 16px;
+
+        Text {
+            x: 0px;
+            y: 0px;
+            width: parent.width;
+            text: root.sizes[root.shot.size] + " · " + root.motions[root.shot.motion] + " · " + Math.round(root.shot.seconds) + "s";
+            color: Theme.fg-muted;
+            font-size: Theme.fs-sm;
+            overflow: elide;
+        }
+        Text {
+            x: 0px;
+            y: 20px;
+            width: parent.width;
+            height: parent.height - 52px;
+            text: root.shot.action == "" ? I18n.t("story.noAction") : root.shot.action;
+            color: root.shot.action == "" ? Theme.fg-dim : Theme.fg;
+            font-size: Theme.fs;
+            wrap: word-wrap;
+            overflow: elide;
+        }
+        PhaseChip {
+            x: 0px;
+            y: parent.height - self.height;
+            phase: root.shot.phase;
+            progress: root.shot.progress;
+        }
+    }
+    TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+// A line of text that is edited here and written to Rust as it changes.
+component Field inherits Rectangle {
+    in property <string> source;
+    in property <bool> tall;
+    in property <string> placeholder;
+
+    callback edited(text: string);
+
+    background: Theme.field;
+    border-radius: Theme.r;
+    border-width: 1px;
+    border-color: input.has-focus ? Theme.accent : Theme.line;
+    min-height: root.tall ? 76px : 30px;
+
+    changed source => {
+        if (!input.has-focus) {
+            input.text = root.source;
+        }
+    }
+    init => { input.text = root.source; }
+
+    if input.text == "" && !input.has-focus: Text {
+        x: 10px;
+        y: root.tall ? 8px : (parent.height - self.height) / 2;
+        text: root.placeholder;
+        color: Theme.fg-dim;
+        font-size: Theme.fs-lg;
+    }
+    input := TextInput {
+        x: 10px;
+        y: root.tall ? 8px : (parent.height - self.height) / 2;
+        width: parent.width - 20px;
+        height: root.tall ? parent.height - 16px : self.preferred-height;
+        color: Theme.fg;
+        font-size: Theme.fs-lg;
+        single-line: !root.tall;
+        wrap: root.tall ? word-wrap : no-wrap;
+        selection-background-color: Theme.accent;
+        selection-foreground-color: Theme.on-accent;
+        edited => { root.edited(self.text); }
+    }
+}
+
+component Caption inherits Text {
+    color: Theme.fg-dim;
+    font-size: Theme.fs-sm;
+}
+
+// The storyboard: scenes, shots, and the chosen shot.
+component Storyboard inherits Rectangle {
+    HorizontalLayout {
+        padding: 8px;
+        spacing: 8px;
+
+        // scenes
+        Rectangle {
+            width: 220px;
+            background: Theme.panel;
+            border-radius: Theme.r-lg;
+            VerticalLayout {
+                Rectangle {
+                    height: 44px;
+                    Text {
+                        x: 14px;
+                        text: I18n.t("story.scenes");
+                        color: Theme.fg;
+                        font-size: Theme.fs-lg;
+                        font-weight: Theme.weight-title;
+                        vertical-alignment: center;
+                    }
+                    Button {
+                        x: parent.width - self.width - 8px;
+                        y: (parent.height - self.height) / 2;
+                        glyph: Glyph.plus;
+                        square: true;
+                        ghost: true;
+                        label: I18n.t("story.addScene");
+                        clicked => { StoryState.add-scene(); }
+                    }
+                }
+                Rectangle { height: 1px; background: Theme.line; }
+                Flickable {
+                    for scene[i] in StoryState.scenes: Rectangle {
+                        y: 8px + i * 58px;
+                        x: 8px;
+                        width: parent.width - 16px;
+                        height: 54px;
+                        border-radius: 8px;
+                        background: i == StoryState.scene ? Theme.field : (touch.has-hover ? Theme.field : Colors.transparent);
+                        Text {
+                            x: 10px;
+                            y: 9px;
+                            width: parent.width - 20px;
+                            text: scene.title;
+                            color: Theme.fg;
+                            font-size: Theme.fs-lg;
+                            overflow: elide;
+                        }
+                        Text {
+                            x: 10px;
+                            y: 30px;
+                            width: parent.width - 20px;
+                            text: I18n.t2("story.sceneSummary", scene.shots + "", scene.seconds);
+                            color: Theme.fg-dim;
+                            font-size: Theme.fs-sm;
+                        }
+                        touch := TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => { StoryState.scene-selected(i); }
+                        }
+                    }
+                }
+            }
+        }
+
+        // shots
+        board := Rectangle {
+            horizontal-stretch: 1;
+            background: Theme.panel;
+            border-radius: Theme.r-lg;
+            clip: true;
+
+            property <length> card-w: 300px;
+            property <length> card-h: 164px;
+            property <int> cols: Math.max(1, Math.floor((self.width - 24px) / (self.card-w + 10px)));
+
+            VerticalLayout {
+                Rectangle {
+                    height: 44px;
+                    Text {
+                        x: 14px;
+                        text: StoryState.scenes.length > StoryState.scene && StoryState.scene >= 0
+                            ? StoryState.scenes[StoryState.scene].title : "";
+                        color: Theme.fg;
+                        font-size: Theme.fs-lg;
+                        font-weight: Theme.weight-title;
+                        vertical-alignment: center;
+                    }
+                    HorizontalLayout {
+                        x: parent.width - self.preferred-width - 8px;
+                        y: (parent.height - 28px) / 2;
+                        height: 28px;
+                        spacing: 6px;
+                        Button {
+                            glyph: Glyph.plus;
+                            label: I18n.t("story.addShot");
+                            enabled: StoryState.scenes.length > 0;
+                            clicked => { StoryState.add-shot(); }
+                        }
+                        Button {
+                            glyph: Glyph.sparkle;
+                            label: I18n.t("story.generateAll");
+                            primary: true;
+                            enabled: StoryState.shots.length > 0;
+                            clicked => { StoryState.generate-all(); }
+                        }
+                    }
+                }
+                Rectangle { height: 1px; background: Theme.line; }
+                Rectangle {
+                    vertical-stretch: 1;
+                    if StoryState.shots.length == 0: Text {
+                        width: parent.width - 48px;
+                        x: 24px;
+                        y: parent.height / 2 - 20px;
+                        text: StoryState.scenes.length == 0 ? I18n.t("story.emptyScenes") : I18n.t("story.emptyShots");
+                        color: Theme.fg-dim;
+                        font-size: Theme.fs-lg;
+                        horizontal-alignment: center;
+                        wrap: word-wrap;
+                    }
+                    Flickable {
+                        content-height: 12px + Math.ceil(StoryState.shots.length / board.cols) * (board.card-h + 10px);
+                        for shot[i] in StoryState.shots: ShotCard {
+                            x: 12px + Math.mod(i, board.cols) * (board.card-w + 10px);
+                            y: 12px + Math.floor(i / board.cols) * (board.card-h + 10px);
+                            width: board.card-w;
+                            height: board.card-h;
+                            shot: shot;
+                            sizes: StoryState.sizes;
+                            motions: StoryState.motions;
+                            selected: i == StoryState.shot;
+                            clicked => { StoryState.shot-selected(i); }
+                        }
+                    }
+                }
+            }
+        }
+
+        // the chosen shot
+        Rectangle {
+            width: 340px;
+            background: Theme.panel;
+            border-radius: Theme.r-lg;
+            clip: true;
+
+            if !StoryState.has-current: Text {
+                width: parent.width - 40px;
+                x: 20px;
+                y: parent.height / 2 - 20px;
+                text: I18n.t("story.pickShot");
+                color: Theme.fg-dim;
+                font-size: Theme.fs-lg;
+                horizontal-alignment: center;
+                wrap: word-wrap;
+            }
+            if StoryState.has-current: VerticalLayout {
+                Rectangle {
+                    height: 44px;
+                    Text {
+                        x: 14px;
+                        text: I18n.t1("story.shotTitle", StoryState.current.number);
+                        color: Theme.fg;
+                        font-size: Theme.fs-lg;
+                        font-weight: Theme.weight-title;
+                        vertical-alignment: center;
+                    }
+                    PhaseChip {
+                        x: parent.width - self.width - 14px;
+                        y: (parent.height - self.height) / 2;
+                        phase: StoryState.current.phase;
+                        progress: StoryState.current.progress;
+                    }
+                }
+                Rectangle { height: 1px; background: Theme.line; }
+                VerticalLayout {
+                    padding: 14px;
+                    spacing: 6px;
+
+                    Caption { text: I18n.t("story.action"); }
+                    Field {
+                        tall: true;
+                        placeholder: I18n.t("story.actionHint");
+                        source: StoryState.current.action;
+                        edited(text) => { StoryState.action-edited(text); }
+                    }
+                    Caption { text: I18n.t("story.line"); }
+                    Field {
+                        placeholder: I18n.t("story.lineHint");
+                        source: StoryState.current.line;
+                        edited(text) => { StoryState.line-edited(text); }
+                    }
+                    Rectangle { height: 4px; }
+                    HorizontalLayout {
+                        spacing: 8px;
+                        VerticalLayout {
+                            spacing: 6px;
+                            Caption { text: I18n.t("story.size"); }
+                            Select {
+                                options: StoryState.sizes;
+                                current: StoryState.current.size;
+                                changed(index) => { StoryState.size-changed(index); }
+                            }
+                        }
+                        VerticalLayout {
+                            spacing: 6px;
+                            Caption { text: I18n.t("story.motion"); }
+                            Select {
+                                options: StoryState.motions;
+                                current: StoryState.current.motion;
+                                changed(index) => { StoryState.motion-changed(index); }
+                            }
+                        }
+                    }
+                    Rectangle { height: 4px; }
+                    Caption { text: I18n.t("story.seconds"); }
+                    HorizontalLayout {
+                        spacing: 8px;
+                        alignment: start;
+                        Button {
+                            glyph: Glyph.minus;
+                            square: true;
+                            label: I18n.t("story.shorter");
+                            clicked => { StoryState.seconds-changed(Math.max(1, StoryState.current.seconds - 1)); }
+                        }
+                        Rectangle {
+                            width: 60px;
+                            Text {
+                                text: Math.round(StoryState.current.seconds) + " s";
+                                color: Theme.fg;
+                                font-size: Theme.fs-lg;
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                            }
+                        }
+                        Button {
+                            glyph: Glyph.plus;
+                            square: true;
+                            label: I18n.t("story.longer");
+                            clicked => { StoryState.seconds-changed(Math.min(15, StoryState.current.seconds + 1)); }
+                        }
+                    }
+                    Rectangle { height: 4px; }
+                    Caption { text: I18n.t("story.firstFrame"); }
+                    Rectangle {
+                        height: 150px;
+                        Frame {
+                            x: 0px;
+                            height: parent.height;
+                            shot: StoryState.current;
+                        }
+                        Text {
+                            x: parent.height * 9 / 16 + 12px;
+                            width: parent.width - self.x;
+                            y: 0px;
+                            text: StoryState.current.note;
+                            color: StoryState.current.phase == 4 ? Theme.danger : Theme.fg-dim;
+                            font-size: Theme.fs;
+                            wrap: word-wrap;
+                        }
+                    }
+                    Rectangle { vertical-stretch: 1; }
+                    HorizontalLayout {
+                        spacing: 8px;
+                        Button {
+                            glyph: Glyph.trash;
+                            danger: true;
+                            square: true;
+                            large: true;
+                            label: I18n.t("story.deleteShot");
+                            clicked => { StoryState.delete-shot(); }
+                        }
+                        Button {
+                            glyph: Glyph.sparkle;
+                            label: StoryState.current.has-frame ? I18n.t("story.remakeFrame") : I18n.t("story.makeFrame");
+                            primary: true;
+                            large: true;
+                            block: true;
+                            enabled: StoryState.current.phase != 1 && StoryState.current.phase != 2;
+                            clicked => { StoryState.generate-frame(); }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+export component StoryScreen inherits Rectangle {
+    /// Back to the editor.
+    callback open-editor();
+
+    background: Theme.page;
+
+    VerticalLayout {
+        // the strip: the project, the stages, and the way back to the editor
+        Rectangle {
+            height: 52px;
+            HorizontalLayout {
+                padding-left: 16px;
+                padding-right: 16px;
+                spacing: 4px;
+                for name[i] in StoryState.stages: StageTab {
+                    number: i + 1;
+                    label: name;
+                    current: i == StoryState.stage;
+                    done: i < StoryState.stage;
+                    clicked => { StoryState.stage-selected(i); }
+                }
+                Rectangle { horizontal-stretch: 1; }
+                VerticalLayout {
+                    alignment: center;
+                    Text {
+                        text: StoryState.summary;
+                        color: Theme.fg-muted;
+                        font-size: Theme.fs;
+                    }
+                }
+                Rectangle { width: 12px; }
+                VerticalLayout {
+                    alignment: center;
+                    Button {
+                        glyph: Glyph.film;
+                        label: I18n.t("story.toEditor");
+                        clicked => { root.open-editor(); }
+                    }
+                }
+            }
+            Rectangle { y: parent.height - 1px; height: 1px; background: Theme.line; }
+        }
+
+        Rectangle {
+            vertical-stretch: 1;
+            if StoryState.stage == 2: Storyboard { }
+            if StoryState.stage != 2: Text {
+                text: I18n.t("story.stageLater");
+                color: Theme.fg-dim;
+                font-size: Theme.fs-lg;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
+    }
+}

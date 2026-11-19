@@ -66,6 +66,7 @@ import {
     StartScreen,
 } from "start.slint";
 import { TitleBar } from "title-bar.slint";
+import { StoryScene, StoryScreen, StoryShot, StoryState } from "story/story.slint";
 import { PhoneEditor, PhoneSheets } from "phone/editor.slint";
 import {
     AppliedEntryData,
@@ -124,6 +125,9 @@ import {
 } from "workspace/agent-pane.slint";
 
 export {
+    StoryScene,
+    StoryShot,
+    StoryState,
     AgentSkill,
     AgentToolCall,
     AgentAttachment,
@@ -254,6 +258,16 @@ export component App inherits Window {
     changed on-start => {
         if (!root.on-start) {
             keys.focus();
+        } else {
+            root.on-story = false;
+        }
+    }
+    // The story screen shares the project with the editor: which of the two
+    // the window shows.
+    in-out property <bool> on-story: false;
+    changed on-story => {
+        if (root.on-story) {
+            StoryState.entered();
         }
     }
     property <bool> sheet-open: root.export.open || root.settings.open
@@ -788,6 +802,8 @@ export component App inherits Window {
                 minimize => { root.titlebar-minimize(); }
                 close => { root.titlebar-close(); }
                 open-settings => { root.open-settings(); }
+                story: root.on-story;
+                mode-selected(story) => { root.on-story = story; }
                 add-pane(kind) => { Editor.dock-add(kind); }
                 export-clicked => { root.export-clicked(); }
             }
@@ -821,8 +837,12 @@ export component App inherits Window {
             // nothing is passed to it: it is a box with four seats in it, and
             // the views inside those seats reach the state directly. See
             // editor.slint.
-            if !root.on-start && !root.phone: Workspace {
+            if !root.on-start && !root.phone && !root.on-story: Workspace {
                 vertical-stretch: 1;
+            }
+            if !root.on-start && !root.phone && root.on-story: StoryScreen {
+                vertical-stretch: 1;
+                open-editor => { root.on-story = false; }
             }
 
             // The phone's editor reads the same global; only the shell round

@@ -1163,6 +1163,7 @@ dependencies = [
  "concat-agent",
  "concat-api",
  "concat-core",
+ "concat-drama",
  "concat-effects",
  "concat-export",
  "concat-host",

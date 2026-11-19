@@ -54,6 +54,44 @@ component WindowButton inherits Rectangle {
     }
 }
 
+// Creating and cutting: the two screens a project is worked on in.
+component ModeSwitch inherits Rectangle {
+    in property <bool> story;
+    callback selected(story: bool);
+
+    height: 22px;
+    width: 2 * 62px + 4px;
+    border-radius: 11px;
+    background: Theme.well;
+
+    Rectangle {
+        x: 2px + (root.story ? 0px : 62px);
+        y: 2px;
+        width: 60px;
+        height: parent.height - 4px;
+        border-radius: 9px;
+        background: Theme.field-active;
+        animate x { duration: 120ms; easing: cubic-bezier(0.4, 0, 0.2, 1); }
+    }
+    for entry[i] in [I18n.t("titleBar.create"), I18n.t("titleBar.cut")]: Rectangle {
+        x: 2px + i * 62px;
+        y: 2px;
+        width: 60px;
+        height: parent.height - 4px;
+        Text {
+            text: entry;
+            color: (i == 0) == root.story ? Theme.fg : Theme.fg-muted;
+            font-size: Theme.fs-sm;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+        TouchArea {
+            mouse-cursor: pointer;
+            clicked => { root.selected(i == 0); }
+        }
+    }
+}
+
 component MenuLabel inherits Rectangle {
     in property <string> label;
     /// this label's menu is the one currently open
@@ -159,6 +197,9 @@ export component TitleBar inherits Rectangle {
     /// A view was picked from the add-panel list.
     callback add-pane(kind: PaneKind);
     callback export-clicked();
+    /// Which screen the project is on: the story's, or the editor's.
+    in property <bool> story;
+    callback mode-selected(story: bool);
 
     height: 32px;
     // The window's ground, not a panel's: the strip is the frame the panes
@@ -265,6 +306,14 @@ export component TitleBar inherits Rectangle {
         // this is the only place a seat can be brought into existence, which
         // is why it lives on the window and not in a pane.
         if !root.minimal && !root.covered: VerticalLayout {
+            alignment: center;
+            padding-right: 8px;
+            ModeSwitch {
+                story: root.story;
+                selected(story) => { root.mode-selected(story); }
+            }
+        }
+        if !root.minimal && !root.covered && !root.story: VerticalLayout {
             alignment: center;
             AddPaneButton {
                 added(kind) => { root.add-pane(kind); }

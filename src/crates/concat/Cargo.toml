@@ -161,6 +161,7 @@ concat-api.workspace = true
 # input and output, with no window (docs/MCP.md).
 concat-mcp.workspace = true
 concat-agent.workspace = true
+concat-drama.workspace = true
 # The effect catalogue: the inspector's shelves and each link's knobs.
 concat-effects.workspace = true
 # The cutout's mapping from a stage press to a source fraction; the model

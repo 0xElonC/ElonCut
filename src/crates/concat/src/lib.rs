@@ -32,6 +32,7 @@ mod ui {
 }
 
 mod agent;
+mod drama;
 mod batch_volume;
 mod chips;
 mod dock;
@@ -411,6 +412,7 @@ fn start(project: Option<std::path::PathBuf>, smoke: Smoke) -> Result<(), slint:
     app.set_can_drop(cfg!(not(any(target_os = "android", target_os = "ios"))));
     app.set_capcut(concat_host::capcut::drafts_folder().is_some());
     agent::install(&app);
+    drama::install(&app);
 
     // The user's own packages - imported looks, and any effect folder they
     // or the community wrote - sit beside the built-ins from the first
