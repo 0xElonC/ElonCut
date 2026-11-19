@@ -15,7 +15,7 @@
 
 use std::collections::{HashMap, VecDeque};
 use std::io::{BufRead, BufReader, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
@@ -119,6 +119,79 @@ fn stopped_message(program: &str, code: Option<String>, said: &str) -> String {
     message
 }
 
+/// Where an npm shim leads: the `node` to run and the script it runs. The
+/// shim `codex.cmd` only starts `node codex.js` through the command
+/// interpreter, a layer that has no console to work with when the editor
+/// starts it without a window, so the editor starts node itself.
+pub(crate) fn shim_target(
+    program: &Path,
+    exists: impl Fn(&Path) -> bool,
+) -> Option<(PathBuf, PathBuf)> {
+    let extension = program.extension()?.to_str()?.to_ascii_lowercase();
+    if extension != "cmd" && extension != "bat" {
+        return None;
+    }
+    let folder = program.parent()?;
+    let script = folder.join("node_modules/@openai/codex/bin/codex.js");
+    if !exists(&script) {
+        return None;
+    }
+    // Node is beside the shim when npm and node were installed together, and
+    // on the PATH otherwise.
+    let beside = folder.join("node.exe");
+    let node = if exists(&beside) { beside } else { PathBuf::from("node") };
+    Some((node, script))
+}
+
+/// The command that runs Codex with `arguments`.
+fn launcher(program: &Path, arguments: &[&str]) -> Command {
+    let mut command = match shim_target(program, |path| path.is_file()) {
+        Some((node, script)) => {
+            let mut command = Command::new(node);
+            command.arg(script);
+            command
+        }
+        None => Command::new(program),
+    };
+    command.args(arguments);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        // No console window behind the editor.
+        command.creation_flags(0x0800_0000);
+    }
+    command
+}
+
+/// What Codex says when asked to check its configuration, for the message
+/// shown when it ended without saying anything: the usual reason a program
+/// that starts fine by hand stops at once is a file it reads on the way up.
+fn probe(program: &Path) -> String {
+    let mut command = launcher(program, &["app-server", "--print-startup-config"]);
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let (send, receive) = mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = send.send(command.output().map_err(|error| error.to_string()));
+    });
+    match receive.recv_timeout(Duration::from_secs(10)) {
+        Ok(Ok(output)) => {
+            let mut text = String::from_utf8_lossy(&output.stderr).into_owned();
+            if text.trim().is_empty() {
+                text = String::from_utf8_lossy(&output.stdout).into_owned();
+            }
+            let text = text.trim();
+            let start = text.len().saturating_sub(500);
+            let start = (start..=text.len()).find(|i| text.is_char_boundary(*i)).unwrap_or(0);
+            format!("checking its configuration: {}", &text[start..])
+        }
+        Ok(Err(error)) => format!("checking its configuration failed: {error}"),
+        Err(_) => "checking its configuration did not finish".to_owned(),
+    }
+}
+
 /// A running `codex app-server`.
 pub struct Codex {
     stdin: Arc<Mutex<ChildStdin>>,
@@ -135,18 +208,11 @@ impl Codex {
         program: &Path,
         on_incoming: impl Fn(Incoming) + Send + 'static,
     ) -> Result<Codex, String> {
-        let mut command = Command::new(program);
+        let mut command = launcher(program, &["app-server"]);
         command
-            .arg("app-server")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
-        #[cfg(windows)]
-        {
-            use std::os::windows::process::CommandExt;
-            // No console window behind the editor.
-            command.creation_flags(0x0800_0000);
-        }
         let mut child = command
             .spawn()
             .map_err(|error| format!("{} could not be started: {error}", program.display()))?;
@@ -170,6 +236,8 @@ impl Codex {
         });
 
         let waiting = Arc::clone(&pending);
+        let lines = Arc::clone(&tail);
+        let program_path = program.to_owned();
         let process = Arc::new(Mutex::new(child));
         let watched = Arc::clone(&process);
         let program_name = program.display().to_string();
@@ -186,7 +254,14 @@ impl Codex {
                         }
                     }
                     Some(Line::Incoming(incoming)) => on_incoming(incoming),
-                    None => log::debug!("agent: a line that is not protocol: {line}"),
+                    None => {
+                        log::debug!("agent: a line that is not protocol: {line}");
+                        let mut keep = lines.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+                        if keep.len() == 12 {
+                            keep.pop_front();
+                        }
+                        keep.push_back(line);
+                    }
                 }
             }
             // Ended: everything still waiting for an answer gets this one.
@@ -203,6 +278,7 @@ impl Codex {
                 .find(|line| !line.trim().is_empty())
                 .cloned()
                 .unwrap_or_default();
+            let said = if said.is_empty() { probe(&program_path) } else { said };
             let stopped = stopped_message(&program_name, code, &said);
             let waiters: Vec<Waiting> = waiting
                 .lock()
@@ -323,6 +399,27 @@ impl Drop for Codex {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn an_npm_shim_leads_to_node_and_the_script() {
+        let shim = Path::new("/n/npm/codex.cmd");
+        let script = Path::new("/n/npm/node_modules/@openai/codex/bin/codex.js");
+        let found = shim_target(shim, |p| p == script);
+        assert_eq!(found, Some((PathBuf::from("node"), script.to_owned())));
+
+        let node = Path::new("/n/npm/node.exe");
+        let found = shim_target(shim, |p| p == script || p == node);
+        assert_eq!(found, Some((node.to_owned(), script.to_owned())));
+    }
+
+    #[test]
+    fn a_program_that_is_not_a_shim_is_run_itself() {
+        let anything = |_: &Path| true;
+        assert_eq!(shim_target(Path::new("/n/codex.exe"), anything), None);
+        assert_eq!(shim_target(Path::new("/n/codex"), anything), None);
+        // A shim whose script is not where npm puts it is left to the shell.
+        assert_eq!(shim_target(Path::new("/n/codex.cmd"), |_| false), None);
+    }
+
     use super::*;
 
     #[test]
