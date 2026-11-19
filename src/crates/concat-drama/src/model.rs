@@ -256,6 +256,9 @@ pub struct Story {
     /// One sentence.
     #[serde(default)]
     pub logline: String,
+    /// The script as it was written, which the scenes are split from.
+    #[serde(default)]
+    pub script: String,
     /// The look of every picture: "cinematic, rainy night, film grain".
     #[serde(default)]
     pub style: String,
@@ -278,6 +281,7 @@ impl Default for Story {
             version: 1,
             title: String::new(),
             logline: String::new(),
+            script: String::new(),
             style: String::new(),
             frame: (1080, 1920),
             cast: Vec::new(),
@@ -310,7 +314,7 @@ impl Story {
         }
     }
 
-    fn fresh(&mut self, prefix: char) -> String {
+    pub(crate) fn fresh(&mut self, prefix: char) -> String {
         let id = format!("{prefix}{}", self.next_id);
         self.next_id += 1;
         id

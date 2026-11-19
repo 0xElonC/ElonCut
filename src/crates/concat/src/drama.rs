@@ -14,7 +14,8 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use concat_drama::{
-    Event, Kind, Line, Motion, Phase, Queue, Rehearsal, ShotSize, Story, Target, jobs, prompt, store,
+    Event, Kind, Line, Motion, Phase, Queue, Rehearsal, ShotSize, Story, Target, jobs, parse_line, prompt,
+    script, store,
 };
 use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
 
@@ -72,26 +73,6 @@ fn with(body: impl FnOnce(&mut Controller, &Shell, &App)) {
             }
         });
     });
-}
-
-/// "林夏：哪来的?" as a line: who, and what is said. A line with no name
-/// before a colon is the narrator's.
-fn parse_line(text: &str) -> Option<Line> {
-    let text = text.trim();
-    if text.is_empty() {
-        return None;
-    }
-    // Only the first colon can mark a name.
-    if let Some((at, colon)) = text.char_indices().find(|(_, c)| *c == '：' || *c == ':') {
-        let who = text[..at].trim();
-        if !who.is_empty() && who.chars().count() <= 12 {
-            return Some(Line {
-                who: who.to_owned(),
-                text: text[at + colon.len_utf8()..].trim().to_owned(),
-            });
-        }
-    }
-    Some(Line { who: String::new(), text: text.to_owned() })
 }
 
 fn show_line(line: &Option<Line>) -> String {
@@ -216,6 +197,7 @@ impl Controller {
         state.set_sizes(strings(&SIZES.map(|(_, key)| key)));
         state.set_motions(strings(&MOTIONS.map(|(_, key)| key)));
         state.set_notice(self.notice.as_str().into());
+        self.publish_script(app);
 
         let Some(story) = &self.story else {
             state.set_title("".into());
@@ -268,6 +250,33 @@ impl Controller {
         }
         state.set_shot(shot.map(|i| i as i32).unwrap_or(-1));
         state.set_shots(ModelRc::new(VecModel::from(cards)));
+    }
+
+    /// The script, and what splitting it would do.
+    fn publish_script(&self, app: &App) {
+        let state = app.global::<StoryState>();
+        let Some(story) = &self.story else {
+            state.set_script("".into());
+            state.set_script_plan("".into());
+            state.set_script_warn("".into());
+            state.set_script_can_apply(false);
+            return;
+        };
+        state.set_script(story.script.as_str().into());
+        let blank = story.script.trim().is_empty();
+        let plan = script::plan(story, &story.script);
+        let mut text = if blank || plan.shots == 0 {
+            t("story.scriptEmpty")
+        } else {
+            tf("story.scriptPlan", &[&plan.scenes, &plan.shots, &clock(plan.seconds)])
+        };
+        if plan.kept > 0 {
+            text = format!("{text}\n{}", tf("story.scriptKept", &[&plan.kept]));
+        }
+        state.set_script_plan(text.into());
+        let warn = if plan.removed > 0 { tf("story.scriptRemoved", &[&plan.removed]) } else { String::new() };
+        state.set_script_warn(warn.into());
+        state.set_script_can_apply(!blank && plan.shots > 0);
     }
 
     fn edit(&mut self, app: &App, change: impl FnOnce(&mut concat_drama::Shot)) {
@@ -334,6 +343,38 @@ pub fn install(app: &App) {
     state.on_entered(|| with(|c, shell, app| c.enter(shell, app)));
     state.on_stage_selected(|index| {
         with(|_, _, app| app.global::<StoryState>().set_stage(index));
+    });
+    state.on_script_edited(|text| {
+        with(|c, _, app| {
+            if let Some(story) = c.story.as_mut() {
+                story.script = text.to_string();
+                c.save();
+                c.publish_script(app);
+            }
+        });
+    });
+    state.on_use_example(|| {
+        with(|c, _, app| {
+            if let Some(story) = c.story.as_mut()
+                && story.script.trim().is_empty()
+            {
+                story.script = t("story.scriptExample");
+                c.save();
+                c.publish(app);
+            }
+        });
+    });
+    state.on_apply_script(|| {
+        with(|c, _, app| {
+            let Some(story) = c.story.as_mut() else { return };
+            let text = story.script.clone();
+            script::apply(story, &text, &|n| tf("story.newScene", &[&n]));
+            c.scene = 0;
+            c.shot = None;
+            c.save();
+            c.publish(app);
+            app.global::<StoryState>().set_stage(2);
+        });
     });
     state.on_scene_selected(|index| {
         with(|c, _, app| {
@@ -459,25 +500,6 @@ pub fn install(app: &App) {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn a_name_before_a_colon_is_who_speaks() {
-        let line = parse_line("林夏：这块表,哪来的?").unwrap();
-        assert_eq!((line.who.as_str(), line.text.as_str()), ("林夏", "这块表,哪来的?"));
-        let line = parse_line("Xia: where from?").unwrap();
-        assert_eq!((line.who.as_str(), line.text.as_str()), ("Xia", "where from?"));
-    }
-
-    #[test]
-    fn a_line_without_a_name_is_the_narrators() {
-        let line = parse_line("雨下了一整夜").unwrap();
-        assert!(line.who.is_empty());
-        assert_eq!(line.text, "雨下了一整夜");
-        // A colon far into a sentence is not a name.
-        let line = parse_line("It was the night before the storm: nobody slept").unwrap();
-        assert!(line.who.is_empty());
-        assert_eq!(parse_line("   "), None);
-    }
 
     #[test]
     fn a_line_is_shown_the_way_it_is_typed() {

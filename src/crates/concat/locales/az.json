@@ -1189,5 +1189,16 @@
   "story.summary": "{0} shots · {1}",
   "story.newScene": "Scene {0}",
   "story.needsAction": "Write what happens first.",
-  "story.untitled": "Untitled story"
+  "story.untitled": "Untitled story",
+  "story.scriptTitle": "Script",
+  "story.scriptHint": "Write the story here.\n\nScene: Old Zhou's shop\nRain falls on the shop sign.\nZhou: It's late. What can I get you?",
+  "story.scriptFormatTitle": "How to write it",
+  "story.scriptFormat": "A line starting with “Scene:” begins a scene.\n“Name: words” is someone speaking.\nAny other line is something that happens, and becomes a shot; a spoken line right after it joins that shot.\n\nSplitting again keeps every shot whose words did not change, with what was made for it.",
+  "story.scriptExampleButton": "Insert an example",
+  "story.scriptExample": "Scene: Old Zhou's shop\nRain on the window. The shop sign flickers on and off.\nZhou: It's late. What can I get you?\nXia stares at the pocket watch on the counter.\nXia: Where did you get this watch?\n\nScene: The alley\nA shadow climbs over the wall.\nChen: It wasn't me. I was only keeping it for someone.",
+  "story.scriptApply": "Split into storyboard",
+  "story.scriptEmpty": "Write something first.",
+  "story.scriptPlan": "{0} scenes · {1} shots · about {2}",
+  "story.scriptKept": "{0} shots keep what was already made.",
+  "story.scriptRemoved": "{0} shots are no longer in the script and will be removed, with what was made for them."
 }

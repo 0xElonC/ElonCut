@@ -1189,5 +1189,16 @@
   "story.summary": "{0} 个镜头 · {1}",
   "story.newScene": "场景 {0}",
   "story.needsAction": "先写下这个镜头里发生什么。",
-  "story.untitled": "未命名故事"
+  "story.untitled": "未命名故事",
+  "story.scriptTitle": "剧本",
+  "story.scriptHint": "在这里写故事。\n\n场景:老周的店\n雨水打在小店的招牌上。\n老周:这么晚了,姑娘要点什么?",
+  "story.scriptFormatTitle": "怎么写",
+  "story.scriptFormat": "以“场景:”开头的一行是新场景。\n“名字:台词”是某人说话。\n其他每一行是发生的事,会成为一个镜头;紧跟其后的台词归入同一个镜头。\n\n再次拆分时,文字没变的镜头会原样保留,已生成的内容也在。",
+  "story.scriptExampleButton": "插入示例",
+  "story.scriptExample": "场景:老周的店\n雨幕里,小店的招牌忽明忽暗。\n老周:这么晚了,姑娘要点什么?\n林夏盯着柜台上的怀表。\n林夏:这块表,哪来的?\n\n场景:小巷\n一道黑影翻过围墙。\n陈默:不是我……我只是替人保管。",
+  "story.scriptApply": "拆成分镜",
+  "story.scriptEmpty": "先写点什么。",
+  "story.scriptPlan": "{0} 个场景 · {1} 个镜头 · 约 {2}",
+  "story.scriptKept": "{0} 个镜头保留已生成的内容。",
+  "story.scriptRemoved": "{0} 个镜头不在剧本里了,会连同已生成的内容一起移除。"
 }

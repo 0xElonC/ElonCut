@@ -13,8 +13,10 @@
 pub mod jobs;
 pub mod model;
 pub mod prompt;
+pub mod script;
 pub mod store;
 
 pub use jobs::{Backend, Event, Made, Queue, Rehearsal, Target};
 pub use model::{Character, Kind, Line, Motion, Phase, Scene, Shot, ShotSize, Slot, Story, Take, Voice};
 pub use prompt::{Missing, Request};
+pub use script::{Plan, parse_line};
