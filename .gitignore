@@ -61,3 +61,6 @@ desktop.ini
 
 # Audits are working notes for whoever runs them, not part of the source
 audit/
+# eflow-plan: local plan state (history in handoff-ledger.jsonl is committed)
+/handoff.md
+/handoff.md.*
