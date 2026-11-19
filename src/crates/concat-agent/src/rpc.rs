@@ -82,6 +82,43 @@ pub fn read_line(line: &str) -> Option<Line> {
 
 type Waiting = Box<dyn FnOnce(Reply) + Send>;
 
+/// How the process ended, once it has: waits a moment for a program that is
+/// only just exiting, and gives up on one that is not.
+fn exit_code(child: &Mutex<Child>) -> Option<String> {
+    for _ in 0..20 {
+        let status = child
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .try_wait();
+        match status {
+            Ok(Some(status)) => {
+                return Some(match status.code() {
+                    Some(code) => format!("exit code {code}"),
+                    None => "ended by a signal".to_owned(),
+                });
+            }
+            Ok(None) => std::thread::sleep(Duration::from_millis(50)),
+            Err(_) => return None,
+        }
+    }
+    None
+}
+
+/// What the window says when Codex ends: which program, how, and the last
+/// thing it said, so a failure on someone else's computer can be read off
+/// the screen.
+fn stopped_message(program: &str, code: Option<String>, said: &str) -> String {
+    let mut message = String::from("Codex stopped");
+    if let Some(code) = code {
+        message.push_str(&format!(" ({code})"));
+    }
+    if !said.is_empty() {
+        message.push_str(&format!(": {said}"));
+    }
+    message.push_str(&format!(" [{program}]"));
+    message
+}
+
 /// A running `codex app-server`.
 pub struct Codex {
     stdin: Arc<Mutex<ChildStdin>>,
@@ -121,7 +158,7 @@ impl Codex {
         let tail: Arc<Mutex<VecDeque<String>>> = Arc::new(Mutex::new(VecDeque::new()));
 
         let keep = Arc::clone(&tail);
-        std::thread::spawn(move || {
+        let error_reader = std::thread::spawn(move || {
             for line in BufReader::new(stderr).lines().map_while(Result::ok) {
                 log::debug!("agent: codex says: {line}");
                 let mut keep = keep.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -133,6 +170,9 @@ impl Codex {
         });
 
         let waiting = Arc::clone(&pending);
+        let process = Arc::new(Mutex::new(child));
+        let watched = Arc::clone(&process);
+        let program_name = program.display().to_string();
         std::thread::spawn(move || {
             for line in BufReader::new(stdout).lines().map_while(Result::ok) {
                 match read_line(&line) {
@@ -150,6 +190,11 @@ impl Codex {
                 }
             }
             // Ended: everything still waiting for an answer gets this one.
+            // The error stream is read on its own thread and may not have
+            // finished with the last of what it said: wait for it, or the
+            // reason the program gave is lost and "stopped" is all there is.
+            let _ = error_reader.join();
+            let code = exit_code(&watched);
             let said = tail
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -158,11 +203,7 @@ impl Codex {
                 .find(|line| !line.trim().is_empty())
                 .cloned()
                 .unwrap_or_default();
-            let stopped = if said.is_empty() {
-                "Codex stopped".to_owned()
-            } else {
-                format!("Codex stopped: {said}")
-            };
+            let stopped = stopped_message(&program_name, code, &said);
             let waiters: Vec<Waiting> = waiting
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -179,7 +220,7 @@ impl Codex {
             stdin: Arc::new(Mutex::new(stdin)),
             next: AtomicU64::new(1),
             pending,
-            child: Arc::new(Mutex::new(child)),
+            child: process,
         })
     }
 
