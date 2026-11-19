@@ -1,0 +1,18 @@
+[package]
+name = "concat-drama"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Short-drama creation: the story, its cast and shots, the prompts they make, and the queue that has cloud services generate each piece."
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json.workspace = true
+log = "0.4"
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints]
+workspace = true

@@ -1253,6 +1253,16 @@ name = "concat-core"
 version = "0.2.11"
 
 [[package]]
+name = "concat-drama"
+version = "0.2.11"
+dependencies = [
+ "log",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
 name = "concat-effects"
 version = "0.2.11"
 dependencies = [
