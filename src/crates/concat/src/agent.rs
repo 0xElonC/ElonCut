@@ -171,6 +171,8 @@ fn instructions(project: Option<&str>, live: bool) -> String {
         "You are the editing agent inside ElonCut, a desktop video editor. You edit video by \
          calling the eloncut MCP tools (project_*, timeline_read, clip_*, title_add, captions_add, \
          effect_*, export_*, preview_frame and the rest); do not edit project files by hand. \
+         Before starting an edit, call guide_read without arguments for the operation manual's \
+         directory, then call guide_read with topic to read the relevant topics. \
          Read the timeline with timeline_read before changing it, make the edits asked for, and \
          look at the result with preview_frame when it matters. Times are in seconds. \
          Files the person attaches are given as paths: bring a video, photo or sound into the \
@@ -1324,6 +1326,29 @@ pub fn attach(shell: &Shell, app: &App, paths: Vec<PathBuf>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn instructions_read_the_embedded_guide_before_editing_in_every_mode() {
+        for project in [None, Some("/tmp/ElonCut Project")] {
+            for live in [false, true] {
+                let text = instructions(project, live);
+                let guide = text
+                    .find("call guide_read without arguments")
+                    .expect("directory first");
+                assert!(text.contains("call guide_read with topic"));
+                assert!(
+                    guide
+                        < text
+                            .find("Read the timeline")
+                            .expect("editing instructions")
+                );
+            }
+        }
+        assert!(instructions(Some("/tmp/project"), true).contains("edit it directly"));
+        assert!(
+            instructions(Some("/tmp/project"), false).contains("Do not open or edit that folder")
+        );
+    }
 
     #[test]
     fn markdown_marks_do_not_show_as_stray_characters() {

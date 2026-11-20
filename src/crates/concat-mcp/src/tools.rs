@@ -4,7 +4,7 @@
 //! The tools: which API method or edit command each one is, and what an
 //! agent is told about it.
 //!
-//! Every tool is a [`concat_api::Request`] in the end. Most are one method
+//! Editing tools are a [`concat_api::Request`] in the end. Most are one method
 //! or one edit command as it is, their arguments that request's fields and
 //! their schema cut from the API's ([`crate::schema`]); a handful compose,
 //! as captions are a batch of titles and waiting on an export is asking its
@@ -69,6 +69,8 @@ pub enum Action {
     },
     /// `version`, with how this server reaches Concat added.
     Version,
+    /// The embedded operation manual; handled locally without the API.
+    GuideRead,
     /// `project.get`, summarised.
     TimelineRead,
     /// Titles at the given times, as one batch.
@@ -166,6 +168,15 @@ impl Tool {
 pub fn catalogue() -> Vec<Tool> {
     use Reply::{Raw, Summary};
     vec![
+        Tool {
+            name: "guide_read",
+            title: "Read the operation manual",
+            description: "Reads the embedded ElonCut operation manual without opening a project or writing files. Before editing, call without arguments for the directory (topic ids and one-line summaries), then pass `topic` to read the relevant topic. An unknown topic returns an error listing available ids. Available in window and headless modes.",
+            read_only: true,
+            destructive: false,
+            idempotent: true,
+            action: Action::GuideRead,
+        },
         Tool {
             name: "concat_version",
             title: "Concat version",
@@ -625,6 +636,7 @@ fn input_schema(schemas: &Schemas, tool: &Tool) -> Option<Value> {
         Action::Method { method, .. } => schemas.method(method),
         Action::Command { op } => schemas.command(op),
         Action::Version => schemas.method("version"),
+        Action::GuideRead => Some(crate::guides::input_schema()),
         Action::TimelineRead => schemas.method("project.get"),
         Action::ExportWait => {
             let mut schema = schemas.method("export.status")?;
@@ -722,6 +734,11 @@ fn edit(op: &str, mut arguments: Value) -> Result<Request, ApiError> {
 fn run(tool: &Tool, arguments: Value, context: Context<'_>) -> Result<Outcome, ApiError> {
     let backend = context.backend;
     match tool.action {
+        Action::GuideRead => Ok(Outcome {
+            content: vec![json!({ "type": "text", "text": crate::guides::read(&arguments)? })],
+            structured: None,
+            is_error: false,
+        }),
         Action::Method { method, reply } => {
             let result = backend.call(request(method, arguments)?)?;
             Ok(Outcome::json(match reply {
@@ -979,6 +996,7 @@ mod tests {
     /// One call each tool may take, as an agent would write it.
     fn samples() -> Vec<(&'static str, Value)> {
         vec![
+            ("guide_read", json!({})),
             ("concat_version", json!({})),
             ("project_list", json!({})),
             (
@@ -1147,6 +1165,40 @@ mod tests {
         }
     }
 
+    #[test]
+    fn guide_read_never_calls_the_backend() {
+        struct NoApi;
+        impl Backend for NoApi {
+            fn call(&mut self, _: Request) -> Result<Value, ApiError> {
+                panic!("guide_read must not call the API");
+            }
+            fn describe(&self) -> Value {
+                panic!("guide_read must not inspect the backend");
+            }
+        }
+        let toolbox = Toolbox::new();
+        let (_, schema) = toolbox.find("guide_read").expect("guide tool");
+        for arguments in [
+            json!({}),
+            json!({"topic": "index"}),
+            json!({"topic": "missing-topic"}),
+        ] {
+            check(schema, &arguments, schema, "guide_read").expect("valid guide schema");
+            let result = toolbox
+                .call(
+                    "guide_read",
+                    arguments.clone(),
+                    Context {
+                        backend: &mut NoApi,
+                        cancelled: &AtomicBool::new(false),
+                        progress: None,
+                    },
+                )
+                .expect("guide tool result");
+            assert_eq!(result.is_error, arguments["topic"] == "missing-topic");
+        }
+    }
+
     /// The round trip: what each tool's schema accepts is what its Rust
     /// type reads, and what the Rust type writes the schema accepts.
     #[test]
@@ -1156,6 +1208,10 @@ mod tests {
             let (tool, schema) = toolbox.find(name).unwrap_or_else(|| panic!("no {name}"));
             check(schema, &sample, schema, name).unwrap_or_else(|why| panic!("{why}"));
             let built = match tool.action {
+                Action::GuideRead => {
+                    crate::guides::read(&sample).expect("guide arguments read locally");
+                    continue;
+                }
                 Action::Method { method, .. } => request(method, sample.clone()),
                 Action::Command { op } => edit(op, sample.clone()),
                 Action::Version => request("version", sample.clone()),

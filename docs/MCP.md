@@ -46,14 +46,15 @@ Choose explicitly with `--mcp window` (fail rather than run on its own) or `--mc
 
 Either way the agent writes files - projects, exports, frames - only under your home folder. Set `CONCAT_MCP_ROOTS` (a path list, `:`-separated, `;` on Windows) to allow other folders in headless mode.
 
-The agent edits projects of its own; it does not edit the project open in the window while you watch. That ("live mode") is planned in [#337](https://github.com/jub0t/Concat/issues/337).
+The built-in Agent pane supports **Live mode**, enabled by default. With it on, the agent can open the project on screen and edit it directly: changes appear in the window and join its Undo history. Toggle Live mode in the Agent pane; with it off, the agent must work on a separate project or a copy. The built-in agent uses its own window API bridge; connecting an external MCP client through Settings > Automation does not by itself enable live editing of the project on screen.
 
 ## What the agent can do
 
-Tools are named for what they do, and their argument schemas are generated from the Concat API's own types, so they carry the same limits and descriptions the engine does.
+Tools are named for what they do. Editing tools derive their argument schemas from the Concat API's own types, so they carry the same limits and descriptions the engine does; `guide_read` reads the manual locally in the MCP server.
 
 | Area | Tools |
 | --- | --- |
+| Operation manual | `guide_read` (read-only; omit arguments for topic ids and summaries, or pass `topic` for one article; no open project required) |
 | Projects | `project_list`, `project_create`, `project_open`, `project_save`, `project_close`, `project_set_video` |
 | Reading | `timeline_read` (compact: lanes, clips in time order, media, ids), `project_get` (everything), `concat_version` |
 | Media | `media_probe`, `media_import` |
@@ -67,6 +68,8 @@ Tools are named for what they do, and their argument schemas are generated from 
 | Looking | `preview_frame` (the composited frame as an image) |
 
 Edits stay in memory until `project_save`, as in the window. Times are seconds; a keyframe's position is a fraction of its clip (0 to 1); sizes and offsets are fractions of the frame.
+
+Before editing, read the manual directory with `guide_read`, then read the relevant topics. The manual is embedded in the MCP binary at compile time and returned as text in both window and headless modes; no skill files are installed in your home folder or project.
 
 ## Protocol
 

@@ -123,6 +123,60 @@ impl Agent {
     }
 }
 
+/// The manual is available before opening any project, in either mode.
+fn check_embedded_guide(agent: &mut Agent) {
+    let (_, listed) = agent.ask("tools/list", json!({}));
+    let guide = listed["result"]["tools"]
+        .as_array()
+        .expect("tools")
+        .iter()
+        .find(|tool| tool["name"] == "guide_read")
+        .expect("guide_read listed");
+    assert_eq!(guide["annotations"]["readOnlyHint"], true);
+    assert_eq!(guide["annotations"]["destructiveHint"], false);
+    assert_eq!(guide["annotations"]["idempotentHint"], true);
+    assert!(guide["inputSchema"]["properties"]["path"].is_null());
+
+    // The arguments field itself may be omitted for the directory.
+    let (_, directory) = agent.ask("tools/call", json!({"name": "guide_read"}));
+    assert_eq!(directory["result"]["isError"], false);
+    let directory = directory["result"]["content"][0]["text"]
+        .as_str()
+        .expect("directory");
+    assert!(
+        directory
+            .lines()
+            .any(|line| line.starts_with("- index: ") && line.len() > 9),
+        "{directory}"
+    );
+    let article = agent.tool("guide_read", json!({"topic": "index"}));
+    assert_eq!(
+        article["content"][0]["text"],
+        include_str!("../guides/index.md")
+    );
+
+    let (_, unknown) = agent.ask(
+        "tools/call",
+        json!({"name": "guide_read", "arguments": {"topic": "missing-topic"}}),
+    );
+    assert_eq!(unknown["result"]["isError"], true);
+    let error = unknown["result"]["content"][0]["text"]
+        .as_str()
+        .expect("error");
+    assert!(
+        error.contains("Unknown guide topic \"missing-topic\""),
+        "{error}"
+    );
+    let ids = error
+        .split("Available topic ids: ")
+        .nth(1)
+        .expect("available topic ids");
+    assert!(
+        ids.split([',', ' ', '(']).any(|id| id == "index"),
+        "{error}"
+    );
+}
+
 #[test]
 fn an_agent_edits_previews_and_exports_a_project_headless() {
     let scratch = tempfile::tempdir().expect("scratch");
@@ -147,6 +201,7 @@ fn an_agent_edits_previews_and_exports_a_project_headless() {
             .is_some_and(|text| text.contains("project"))
     );
     agent.send(&json!({ "jsonrpc": "2.0", "method": "notifications/initialized" }));
+    check_embedded_guide(&mut agent);
 
     let (_, listed) = agent.ask("tools/list", json!({}));
     let tools = listed["result"]["tools"].as_array().expect("tools");
@@ -417,6 +472,7 @@ fn through_a_running_server_the_agent_shares_its_api() {
             ("CONCAT_API_TOKEN", server.token().to_owned()),
         ],
     );
+    check_embedded_guide(&mut agent);
     let version = agent.tool("concat_version", json!({}));
     assert_eq!(version["structuredContent"]["mcp"]["mode"], "window");
     assert_eq!(version["structuredContent"]["mcp"]["address"], address);

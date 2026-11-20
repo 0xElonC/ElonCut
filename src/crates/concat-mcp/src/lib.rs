@@ -4,7 +4,7 @@
 //! Concat for AI agents: a Model Context Protocol server over standard
 //! input and output, shipped inside the app as `concat --mcp`.
 //!
-//! It is a thin adapter, and deliberately so. Every tool is a
+//! It is a thin adapter, and deliberately so. Editing tools are a
 //! [`concat_api::Request`] - a method of the API, or one of its edit
 //! commands - and its argument schema is cut out of the schema `schemars`
 //! generates from those types ([`schema`]), so an edit means here exactly
@@ -18,6 +18,7 @@
 //! when it does not.
 
 pub mod backend;
+mod guides;
 pub mod protocol;
 pub mod schema;
 pub mod summary;
